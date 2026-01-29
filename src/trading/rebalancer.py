@@ -232,6 +232,18 @@ class Rebalancer:
             all_allocations = self.broker.get_current_allocation()
             # Filter allocations to only include symbols owned by this portfolio
             final_allocations = self._filter_allocations_by_portfolio(all_allocations)
+            
+            # Reconcile ownership records with broker allocations to fix quantities
+            if not dry_run and self.persistence_manager and buys:
+                try:
+                    reconcile_result = self.persistence_manager.reconcile_ownership_with_broker(
+                        all_allocations, self.portfolio_name
+                    )
+                    if reconcile_result['fixed'] > 0:
+                        logger.info(f"[{self.portfolio_name}] Fixed {reconcile_result['fixed']} ownership quantity records")
+                except Exception as e:
+                    logger.warning(f"[{self.portfolio_name}] Error reconciling ownership: {e}")
+            
             # Update quantities in buys
             for buy in buys:
                 for alloc in final_allocations:
@@ -312,6 +324,9 @@ class Rebalancer:
         for symbol in symbols_to_sell:
             allocation = next((a for a in current_allocations if a.symbol.upper() == symbol), None)
             if allocation:
+                # Track portfolio quantity for deficit calculation (needed after sell)
+                portfolio_tracked_quantity = 0.0
+                
                 if dry_run:
                     sells.append({
                         "symbol": symbol,
@@ -324,20 +339,65 @@ class Rebalancer:
                     try:
                         # Check persistence ownership if enabled
                         if self.persistence_manager:
-                            # Check if other portfolios own this stock
-                            other_portfolios = self.persistence_manager.get_all_portfolios_owning_symbol(symbol)
-                            if len(other_portfolios) > 1 or (len(other_portfolios) == 1 and other_portfolios[0] != self.portfolio_name):
-                                # Multiple portfolios own this stock - calculate sellable quantity
-                                portfolio_fraction = self.persistence_manager.get_portfolio_fraction(symbol, self.portfolio_name)
-                                broker_quantity = allocation.quantity
-                                sellable_quantity = min(allocation.quantity, broker_quantity * portfolio_fraction)
-                                if sellable_quantity < allocation.quantity:
-                                    logger.info(f"[{self.portfolio_name}] Selling {sellable_quantity} shares of {symbol} (portfolio's portion, other portfolios: {[p for p in other_portfolios if p != self.portfolio_name]})")
+                            # Get portfolio's tracked quantity - portfolio always sells ALL of its tracked shares
+                            portfolio_tracked_quantity = self.persistence_manager.get_ownership_quantity(symbol, self.portfolio_name)
+                            broker_total_quantity = allocation.quantity  # This is the total broker quantity (all portfolios combined)
+                            
+                            if portfolio_tracked_quantity > 0:
+                                # Portfolio sells as much as it can: min of tracked quantity and broker total
+                                # First portfolio gets priority - sells as much as it can
+                                sellable_quantity = min(portfolio_tracked_quantity, broker_total_quantity)
+                                deficit_quantity = portfolio_tracked_quantity - sellable_quantity
+                                
+                                # Check if other portfolios own this stock
+                                other_portfolios = self.persistence_manager.get_all_portfolios_owning_symbol(symbol)
+                                
+                                if sellable_quantity > 0:
+                                    if deficit_quantity > 0:
+                                        # Portfolio wants to sell more than broker has - deficit will be treated as external sale
+                                        logger.info(f"[{self.portfolio_name}] Selling {sellable_quantity:.2f} shares of {symbol} (broker has {broker_total_quantity:.2f}, portfolio tracked {portfolio_tracked_quantity:.2f}, deficit {deficit_quantity:.2f} will be treated as external sale)")
+                                    else:
+                                        if len(other_portfolios) > 1:
+                                            logger.info(f"[{self.portfolio_name}] Selling ALL {sellable_quantity:.2f} shares of {symbol} (portfolio's full position, other portfolios: {[p for p in other_portfolios if p != self.portfolio_name]})")
+                                        else:
+                                            logger.info(f"[{self.portfolio_name}] Selling ALL {sellable_quantity:.2f} shares of {symbol} (portfolio's full position)")
+                                    
                                     allocation.quantity = sellable_quantity
                                     allocation.market_value = allocation.current_price * sellable_quantity
-                            
-                            if not self.persistence_manager.can_sell(symbol, allocation.quantity, self.portfolio_name):
-                                logger.warning(f"[{self.portfolio_name}] Cannot sell {symbol}: Not owned according to persistence (owned: {self.persistence_manager.get_ownership_quantity(symbol, self.portfolio_name)})")
+                                else:
+                                    # Broker has no shares available - all will be treated as external sale
+                                    logger.warning(f"[{self.portfolio_name}] Broker has no shares of {symbol} available (portfolio tracked {portfolio_tracked_quantity:.2f}, all will be treated as external sale)")
+                                    # Record entire position as external sale and skip broker sell
+                                    if not dry_run:
+                                        from ..persistence.models import ExternalSaleRecord
+                                        # Get cost basis for calculating estimated proceeds
+                                        ownership_records = self.persistence_manager.get_portfolio_ownership_records(self.portfolio_name)
+                                        ownership = ownership_records.get(symbol.upper(), {})
+                                        total_cost = ownership.get('total_cost', 0.0)
+                                        avg_price = ownership.get('avg_price', 0.0)
+                                        if avg_price == 0 and allocation.current_price > 0:
+                                            avg_price = allocation.current_price
+                                        
+                                        estimated_proceeds = portfolio_tracked_quantity * avg_price
+                                        external_sale = ExternalSaleRecord(
+                                            symbol=symbol,
+                                            quantity=portfolio_tracked_quantity,
+                                            estimated_proceeds=estimated_proceeds,
+                                            detected_date=datetime.now(),
+                                            portfolio_name=self.portfolio_name,
+                                        )
+                                        self.persistence_manager._record_external_sale(external_sale)
+                                        logger.info(f"[{self.portfolio_name}] Recorded external sale: {portfolio_tracked_quantity:.2f} shares of {symbol} (~${estimated_proceeds:.2f})")
+                                    continue
+                                
+                                # Check if we can sell - verify portfolio has enough AND broker has enough total
+                                if not self.persistence_manager.can_sell(symbol, allocation.quantity, self.portfolio_name, broker_total_quantity=broker_total_quantity):
+                                    portfolio_owned = self.persistence_manager.get_ownership_quantity(symbol, self.portfolio_name)
+                                    total_tracked = self.persistence_manager.get_total_tracked_ownership(symbol)
+                                    logger.warning(f"[{self.portfolio_name}] Cannot sell {symbol}: Portfolio owns {portfolio_owned:.2f}, Total tracked: {total_tracked:.2f}, Broker total: {broker_total_quantity:.2f}, Requested: {allocation.quantity:.2f}")
+                                    continue
+                            else:
+                                logger.warning(f"[{self.portfolio_name}] Cannot sell {symbol}: Portfolio has no tracked ownership")
                                 continue
                         
                         success = self.broker.sell(symbol, allocation.quantity)
@@ -361,7 +421,7 @@ class Rebalancer:
                             
                             # Record trade in persistence
                             if self.persistence_manager:
-                                from ..persistence.models import TradeRecord
+                                from ..persistence.models import TradeRecord, ExternalSaleRecord
                                 trade = TradeRecord(
                                     symbol=symbol,
                                     action="SELL",
@@ -373,6 +433,28 @@ class Rebalancer:
                                     portfolio_name=self.portfolio_name,
                                 )
                                 self.persistence_manager.record_trade(trade)
+                                
+                                # If there's a deficit (portfolio wanted to sell more than broker had), record as external sale
+                                if portfolio_tracked_quantity > allocation.quantity:
+                                    deficit_quantity = portfolio_tracked_quantity - allocation.quantity
+                                    # Get cost basis for calculating estimated proceeds
+                                    ownership_records = self.persistence_manager.get_portfolio_ownership_records(self.portfolio_name)
+                                    ownership = ownership_records.get(symbol.upper(), {})
+                                    total_cost = ownership.get('total_cost', 0.0)
+                                    avg_price = ownership.get('avg_price', 0.0)
+                                    if avg_price == 0 and allocation.current_price > 0:
+                                        avg_price = allocation.current_price
+                                    
+                                    estimated_proceeds = deficit_quantity * avg_price
+                                    external_sale = ExternalSaleRecord(
+                                        symbol=symbol,
+                                        quantity=deficit_quantity,
+                                        estimated_proceeds=estimated_proceeds,
+                                        detected_date=datetime.now(),
+                                        portfolio_name=self.portfolio_name,
+                                    )
+                                    self.persistence_manager._record_external_sale(external_sale)
+                                    logger.info(f"[{self.portfolio_name}] Recorded external sale for deficit: {deficit_quantity:.2f} shares of {symbol} (~${estimated_proceeds:.2f}) - broker didn't have enough shares")
                         else:
                             logger.warning(f"Failed to sell {symbol}")
                     except Exception as e:
@@ -494,6 +576,18 @@ class Rebalancer:
             all_allocations = self.broker.get_current_allocation()
             # Filter allocations to only include symbols owned by this portfolio
             final_allocations = self._filter_allocations_by_portfolio(all_allocations)
+            
+            # Reconcile ownership records with broker allocations to fix quantities
+            if not dry_run and self.persistence_manager and buys:
+                try:
+                    reconcile_result = self.persistence_manager.reconcile_ownership_with_broker(
+                        all_allocations, self.portfolio_name
+                    )
+                    if reconcile_result['fixed'] > 0:
+                        logger.info(f"[{self.portfolio_name}] Fixed {reconcile_result['fixed']} ownership quantity records")
+                except Exception as e:
+                    logger.warning(f"[{self.portfolio_name}] Error reconciling ownership: {e}")
+            
             # Update quantities in buys (only if not dry-run, since in dry-run we don't have actual quantities)
             if not dry_run:
                 for buy in buys:

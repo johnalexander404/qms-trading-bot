@@ -82,37 +82,67 @@ class PersistenceManager:
         
         if trade.action == "BUY":
             # Calculate quantity from total cost and price if quantity is 0 or not provided
-            if trade.quantity <= 0 and trade.price > 0:
-                calculated_quantity = trade.total / trade.price
+            # But only if price is reasonable (not equal to total, which would indicate wrong price)
+            if trade.quantity <= 0:
+                if trade.price > 0 and trade.price != trade.total and trade.total > 0:
+                    # Price looks valid - calculate quantity
+                    calculated_quantity = trade.total / trade.price
+                else:
+                    # Price is wrong or missing - defer calculation until we get actual quantity from broker
+                    # Set quantity to 0 for now, will be updated when we reconcile with broker
+                    calculated_quantity = 0.0
             else:
                 calculated_quantity = trade.quantity
             
-            if ownership_doc.exists:
-                # Update existing ownership
-                data = ownership_doc.to_dict()
-                old_quantity = data.get('quantity', 0.0)
-                old_cost = data.get('total_cost', 0.0)
-                
-                new_quantity = old_quantity + calculated_quantity
-                new_cost = old_cost + trade.total
-                
-                ownership_ref.update({
-                    'quantity': new_quantity,
-                    'total_cost': new_cost,
-                    'last_purchase_date': trade.timestamp,
-                    'last_updated': trade.timestamp,
-                })
+            # If we have a valid quantity, update ownership
+            if calculated_quantity > 0:
+                if ownership_doc.exists:
+                    # Update existing ownership
+                    data = ownership_doc.to_dict()
+                    old_quantity = data.get('quantity', 0.0)
+                    old_cost = data.get('total_cost', 0.0)
+                    
+                    new_quantity = old_quantity + calculated_quantity
+                    new_cost = old_cost + trade.total
+                    
+                    ownership_ref.update({
+                        'quantity': new_quantity,
+                        'total_cost': new_cost,
+                        'last_purchase_date': trade.timestamp,
+                        'last_updated': trade.timestamp,
+                    })
+                else:
+                    # Create new ownership record
+                    ownership_ref.set({
+                        'symbol': symbol,
+                        'portfolio_name': portfolio_name,
+                        'quantity': calculated_quantity,
+                        'total_cost': trade.total,
+                        'first_purchase_date': trade.timestamp,
+                        'last_purchase_date': trade.timestamp,
+                        'last_updated': trade.timestamp,
+                    })
             else:
-                # Create new ownership record
-                ownership_ref.set({
-                    'symbol': symbol,
-                    'portfolio_name': portfolio_name,
-                    'quantity': calculated_quantity,
-                    'total_cost': trade.total,
-                    'first_purchase_date': trade.timestamp,
-                    'last_purchase_date': trade.timestamp,
-                    'last_updated': trade.timestamp,
-                })
+                # Quantity is 0 or couldn't be calculated - create/update record with cost but 0 quantity
+                # This will be fixed when we reconcile with broker allocations
+                if ownership_doc.exists:
+                    data = ownership_doc.to_dict()
+                    old_cost = data.get('total_cost', 0.0)
+                    ownership_ref.update({
+                        'total_cost': old_cost + trade.total,
+                        'last_purchase_date': trade.timestamp,
+                        'last_updated': trade.timestamp,
+                    })
+                else:
+                    ownership_ref.set({
+                        'symbol': symbol,
+                        'portfolio_name': portfolio_name,
+                        'quantity': 0.0,  # Will be updated when reconciled
+                        'total_cost': trade.total,
+                        'first_purchase_date': trade.timestamp,
+                        'last_purchase_date': trade.timestamp,
+                        'last_updated': trade.timestamp,
+                    })
         
         elif trade.action == "SELL":
             if ownership_doc.exists:
@@ -168,10 +198,50 @@ class PersistenceManager:
             return data.get('quantity', 0.0)
         return 0.0
     
-    def can_sell(self, symbol: str, quantity: float, portfolio_name: str = "SP400") -> bool:
-        """Check if we can sell the requested quantity for a specific portfolio."""
+    def can_sell(self, symbol: str, quantity: float, portfolio_name: str = "SP400", broker_total_quantity: Optional[float] = None) -> bool:
+        """
+        Check if we can sell the requested quantity for a specific portfolio.
+        
+        When multiple portfolios own the same stock, we need to check:
+        1. Portfolio has enough tracked quantity
+        2. Broker has enough total quantity (across all portfolios)
+        
+        Args:
+            symbol: Stock symbol
+            quantity: Quantity to sell
+            portfolio_name: Portfolio name
+            broker_total_quantity: Optional total quantity from broker (across all portfolios).
+                                  If provided, ensures broker has enough total holdings.
+        
+        Returns:
+            True if portfolio has enough tracked quantity AND (if broker_total_quantity provided) broker has enough total
+        """
         owned_quantity = self.get_ownership_quantity(symbol, portfolio_name)
-        return owned_quantity >= quantity
+        
+        # Check if portfolio has enough tracked quantity
+        if owned_quantity < quantity:
+            return False
+        
+        # If broker total quantity is provided, check if broker has enough total holdings
+        # This is important when multiple portfolios own the same stock - broker account
+        # has all portfolios' shares combined, so we need to ensure broker has enough total
+        if broker_total_quantity is not None:
+            # Broker must have at least the requested quantity (since it holds all portfolios' shares)
+            if broker_total_quantity < quantity:
+                return False
+            
+            # Also verify that the portfolio's share of broker holdings is sufficient
+            # Calculate portfolio's fraction of total tracked ownership
+            total_tracked = self.get_total_tracked_ownership(symbol)
+            if total_tracked > 0:
+                portfolio_fraction = owned_quantity / total_tracked
+                # Portfolio's share of broker holdings
+                portfolio_broker_share = broker_total_quantity * portfolio_fraction
+                # Portfolio can only sell up to its share of broker holdings
+                if portfolio_broker_share < quantity:
+                    return False
+        
+        return True
     
     def get_total_tracked_ownership(self, symbol: str) -> float:
         """Get total tracked ownership across all portfolios for a symbol."""
@@ -549,15 +619,27 @@ class PersistenceManager:
                 if abs(db_data.get('total', 0) - broker_total) > 0.01:
                     needs_update = True
                 
-                if needs_update:
-                    doc_ref = trades_ref.document(doc_id)
-                    doc_ref.update({
-                        'quantity': broker_quantity,
-                        'price': broker_price,
-                        'total': broker_total,
+                # Clear reconciliation_status if it was set to 'unfilled'
+                has_unfilled_status = db_data.get('reconciliation_status') == 'unfilled'
+                if needs_update or has_unfilled_status:
+                    update_data = {
                         'reconciled_at': datetime.now(),
                         'trade_id': trade_id or db_data.get('trade_id'),
-                    })
+                    }
+                    
+                    if needs_update:
+                        update_data.update({
+                            'quantity': broker_quantity,
+                            'price': broker_price,
+                            'total': broker_total,
+                        })
+                    
+                    # Clear reconciliation_status since trade is now matched/filled
+                    if has_unfilled_status:
+                        update_data['reconciliation_status'] = 'filled'
+                    
+                    doc_ref = trades_ref.document(doc_id)
+                    doc_ref.update(update_data)
                     
                     # Update ownership if quantity changed
                     if db_data.get('action') == 'BUY' or db_data.get('action') == 'SELL':
@@ -576,8 +658,15 @@ class PersistenceManager:
         unfilled_count = 0
         for db_trade in db_trades.values():
             if not db_trade['matched']:
+                db_data = db_trade['data']
+                # Check if trade has valid fill data (quantity > 0 and price > 0)
+                db_quantity = db_data.get('quantity', 0)
+                db_price = db_data.get('price', 0)
+                db_total = db_data.get('total', 0)
+                has_valid_fill_data = db_quantity > 0 and db_price > 0 and db_total > 0
+                
                 # Check if this trade is recent (within last 24 hours)
-                db_timestamp = db_trade['data'].get('timestamp')
+                db_timestamp = db_data.get('timestamp')
                 if db_timestamp:
                     # Handle Firestore Timestamp objects
                     if hasattr(db_timestamp, 'timestamp'):
@@ -590,16 +679,121 @@ class PersistenceManager:
                     now_ts = datetime.now().timestamp()
                     time_diff = now_ts - db_ts
                     if time_diff < 86400:  # 24 hours
-                        # Mark as potentially unfilled
-                        doc_ref = trades_ref.document(db_trade['doc_id'])
-                        doc_ref.update({
-                            'reconciliation_status': 'unfilled',
-                            'reconciled_at': datetime.now(),
-                        })
-                        unfilled_count += 1
+                        if has_valid_fill_data:
+                            # Trade has valid fill data but wasn't matched - clear unfilled status
+                            # This can happen if broker doesn't return the trade in history but it was filled
+                            current_status = db_data.get('reconciliation_status')
+                            if current_status == 'unfilled':
+                                doc_ref = trades_ref.document(db_trade['doc_id'])
+                                doc_ref.update({
+                                    'reconciliation_status': 'filled',
+                                    'reconciled_at': datetime.now(),
+                                })
+                        else:
+                            # Trade doesn't have valid fill data - mark as potentially unfilled
+                            doc_ref = trades_ref.document(db_trade['doc_id'])
+                            doc_ref.update({
+                                'reconciliation_status': 'unfilled',
+                                'reconciled_at': datetime.now(),
+                            })
+                            unfilled_count += 1
         
         return {
             'updated': updated_count,
             'missing': missing_count,
             'unfilled': unfilled_count
+        }
+    
+    def reconcile_ownership_with_broker(
+        self,
+        broker_allocations: List[Allocation],
+        portfolio_name: str = "SP400"
+    ) -> dict:
+        """
+        Reconcile ownership records with broker allocations to fix quantities.
+        
+        Updates ownership records to match actual broker positions.
+        This fixes cases where quantities were incorrectly calculated.
+        
+        Args:
+            broker_allocations: List of Allocation objects from broker
+            portfolio_name: Portfolio name to reconcile
+            
+        Returns:
+            Dictionary with reconciliation results:
+            {
+                'updated': int,  # Number of ownership records updated
+                'fixed': int      # Number of records with quantity corrections
+            }
+        """
+        # Get broker positions for this portfolio
+        broker_positions = {}
+        for alloc in broker_allocations:
+            symbol = alloc.symbol.upper()
+            # Check if this portfolio owns this symbol
+            if symbol in self.get_owned_symbols(portfolio_name):
+                # Get portfolio fraction if multiple portfolios own it
+                portfolios_owning = self.get_all_portfolios_owning_symbol(symbol)
+                if len(portfolios_owning) > 1:
+                    portfolio_fraction = self.get_portfolio_fraction(symbol, portfolio_name)
+                    broker_positions[symbol] = {
+                        'quantity': alloc.quantity * portfolio_fraction,
+                        'current_price': alloc.current_price,
+                        'market_value': alloc.market_value * portfolio_fraction,
+                    }
+                else:
+                    broker_positions[symbol] = {
+                        'quantity': alloc.quantity,
+                        'current_price': alloc.current_price,
+                        'market_value': alloc.market_value,
+                    }
+        
+        # Get DB ownership records
+        ownership_ref = self.db.collection('ownership')
+        if FieldFilter:
+            docs = ownership_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name)).stream()
+        else:
+            docs = ownership_ref.where('portfolio_name', '==', portfolio_name).stream()
+        
+        updated_count = 0
+        fixed_count = 0
+        
+        for doc in docs:
+            data = doc.to_dict()
+            symbol = data.get('symbol', '').upper()
+            db_quantity = data.get('quantity', 0.0)
+            db_total_cost = data.get('total_cost', 0.0)
+            
+            if symbol in broker_positions:
+                broker_quantity = broker_positions[symbol]['quantity']
+                broker_price = broker_positions[symbol]['current_price']
+                
+                # Check if quantity needs fixing
+                quantity_diff = abs(db_quantity - broker_quantity)
+                if quantity_diff > 0.01:  # More than 0.01 shares difference
+                    # Update quantity to match broker
+                    doc.reference.update({
+                        'quantity': broker_quantity,
+                        'last_updated': datetime.now(),
+                    })
+                    fixed_count += 1
+                    updated_count += 1
+                    logger.info(f"Fixed quantity for {symbol} in {portfolio_name}: DB={db_quantity:.2f} -> Broker={broker_quantity:.2f}")
+                elif db_quantity == 0 and broker_quantity > 0:
+                    # Quantity was 0, now we have actual quantity
+                    doc.reference.update({
+                        'quantity': broker_quantity,
+                        'last_updated': datetime.now(),
+                    })
+                    fixed_count += 1
+                    updated_count += 1
+                    logger.info(f"Set quantity for {symbol} in {portfolio_name}: {broker_quantity:.2f} (was 0)")
+            elif db_quantity > 0:
+                # Broker doesn't have this position but DB says we own it
+                # This might be an external sale - don't update here, let detect_external_sales handle it
+                pass
+        
+        return {
+            'updated': updated_count,
+            'fixed': fixed_count
         }
