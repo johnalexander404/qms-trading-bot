@@ -363,9 +363,10 @@ class TradingBot:
         total_cost = trade_summary.total_cost
         total_proceeds = trade_summary.total_proceeds
         
-        total_return = current_value - initial_capital
-        total_return_pct = (total_return / initial_capital * 100) if initial_capital > 0 else 0.0
         net_invested = total_cost - total_proceeds
+        # Calculate returns based on invested capital (not including cash)
+        total_return = current_value - net_invested
+        total_return_pct = (total_return / net_invested * 100) if net_invested > 0 else 0.0
         unrealized_pnl = current_value - net_invested
         realized_pnl = total_proceeds - total_cost
         
@@ -390,14 +391,17 @@ class TradingBot:
         """Create multi-portfolio summary with aggregate metrics."""
         total_initial_capital = sum(p.initial_capital for p in performances.values())
         total_current_value = sum(p.current_value for p in performances.values())
-        overall_return = total_current_value - total_initial_capital
-        overall_return_pct = (overall_return / total_initial_capital * 100) if total_initial_capital > 0 else 0.0
+        total_net_invested = sum(p.net_invested for p in performances.values())
+        # Calculate returns based on invested capital (not including cash)
+        overall_return = total_current_value - total_net_invested
+        overall_return_pct = (overall_return / total_net_invested * 100) if total_net_invested > 0 else 0.0
         
         return MultiPortfolioSummary(
             portfolios=portfolio_summaries,
             performances=performances,
             total_initial_capital=total_initial_capital,
             total_current_value=total_current_value,
+            total_net_invested=total_net_invested,
             overall_return=overall_return,
             overall_return_pct=overall_return_pct,
         )

@@ -62,5 +62,6 @@ class MultiPortfolioSummary:
     performances: Dict[str, PortfolioPerformance]  # Key: portfolio_name, Value: PortfolioPerformance
     total_initial_capital: float
     total_current_value: float
+    total_net_invested: float  # Total net capital invested (sum of net_invested across portfolios)
     overall_return: float
     overall_return_pct: float

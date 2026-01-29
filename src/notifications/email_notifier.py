@@ -198,6 +198,10 @@ class EmailNotifier(ABC):
                         <td>${multi_summary.total_initial_capital:,.2f}</td>
                     </tr>
                     <tr>
+                        <td>Total Net Invested</td>
+                        <td>${multi_summary.total_net_invested:,.2f}</td>
+                    </tr>
+                    <tr>
                         <td>Total Current Value</td>
                         <td>${multi_summary.total_current_value:,.2f}</td>
                     </tr>
@@ -300,8 +304,37 @@ class EmailNotifier(ABC):
                     """
                 html += "</table>"
             
+            html += f"""
+                <p><strong>Portfolio Value:</strong> ${summary.portfolio_value:,.2f}</p>
+            </div>
+            """
+        
+        # Add aggregated Final Holdings section (once for all portfolios)
+        # Aggregate allocations across all portfolios
+        aggregated_allocations = {}
+        for summary in multi_summary.portfolios.values():
+            for allocation in summary.final_allocations:
+                symbol = allocation.symbol
+                if symbol in aggregated_allocations:
+                    # Sum quantities and market values for overlapping symbols
+                    aggregated_allocations[symbol].quantity += allocation.quantity
+                    aggregated_allocations[symbol].market_value += allocation.market_value
+                    # Use the latest price (they should be the same anyway)
+                    aggregated_allocations[symbol].current_price = allocation.current_price
+                else:
+                    # Create a copy to avoid modifying the original
+                    from ..broker.models import Allocation
+                    aggregated_allocations[symbol] = Allocation(
+                        symbol=allocation.symbol,
+                        quantity=allocation.quantity,
+                        current_price=allocation.current_price,
+                        market_value=allocation.market_value
+                    )
+        
+        if aggregated_allocations:
             html += """
-                <h4>Final Holdings</h4>
+            <div class="portfolio-section">
+                <h3>Final Holdings (All Portfolios)</h3>
                 <table>
                     <tr>
                         <th>Symbol</th>
@@ -311,7 +344,9 @@ class EmailNotifier(ABC):
                     </tr>
             """
             
-            for allocation in summary.final_allocations:
+            # Sort by symbol for consistent display
+            for symbol in sorted(aggregated_allocations.keys()):
+                allocation = aggregated_allocations[symbol]
                 html += f"""
                     <tr>
                         <td>{allocation.symbol}</td>
@@ -321,9 +356,10 @@ class EmailNotifier(ABC):
                     </tr>
                 """
             
-            html += """
+            total_portfolio_value = sum(alloc.market_value for alloc in aggregated_allocations.values())
+            html += f"""
                 </table>
-                <p><strong>Portfolio Value:</strong> ${summary.portfolio_value:,.2f}</p>
+                <p><strong>Total Portfolio Value:</strong> ${total_portfolio_value:,.2f}</p>
             </div>
             """
         
@@ -386,6 +422,7 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 === Overall Performance ===
 Total Initial Capital: ${multi_summary.total_initial_capital:,.2f}
+Total Net Invested: ${multi_summary.total_net_invested:,.2f}
 Total Current Value: ${multi_summary.total_current_value:,.2f}
 Overall Return: ${multi_summary.overall_return:,.2f} ({multi_summary.overall_return_pct:.2f}%)
 
@@ -426,10 +463,38 @@ Performance: ${performance.total_return:,.2f} ({performance.total_return_pct:.2f
                     text += f"  - {buy['symbol']}: {buy['quantity']:.2f} shares, ${buy['cost']:.2f}\n"
                 text += "\n"
             
-            text += "Final Holdings:\n"
+            text += f"Portfolio Value: ${summary.portfolio_value:,.2f}\n"
+        
+        # Add aggregated Final Holdings section (once for all portfolios)
+        # Aggregate allocations across all portfolios
+        aggregated_allocations = {}
+        for summary in multi_summary.portfolios.values():
             for allocation in summary.final_allocations:
+                symbol = allocation.symbol
+                if symbol in aggregated_allocations:
+                    # Sum quantities and market values for overlapping symbols
+                    aggregated_allocations[symbol].quantity += allocation.quantity
+                    aggregated_allocations[symbol].market_value += allocation.market_value
+                    # Use the latest price (they should be the same anyway)
+                    aggregated_allocations[symbol].current_price = allocation.current_price
+                else:
+                    # Create a copy to avoid modifying the original
+                    from ..broker.models import Allocation
+                    aggregated_allocations[symbol] = Allocation(
+                        symbol=allocation.symbol,
+                        quantity=allocation.quantity,
+                        current_price=allocation.current_price,
+                        market_value=allocation.market_value
+                    )
+        
+        if aggregated_allocations:
+            text += "\n=== Final Holdings (All Portfolios) ===\n"
+            # Sort by symbol for consistent display
+            for symbol in sorted(aggregated_allocations.keys()):
+                allocation = aggregated_allocations[symbol]
                 text += f"  - {allocation.symbol}: {allocation.quantity:.2f} shares @ ${allocation.current_price:.2f} = ${allocation.market_value:.2f}\n"
             
-            text += f"\nPortfolio Value: ${summary.portfolio_value:,.2f}\n"
+            total_portfolio_value = sum(alloc.market_value for alloc in aggregated_allocations.values())
+            text += f"\nTotal Portfolio Value: ${total_portfolio_value:,.2f}\n"
         
         return text
