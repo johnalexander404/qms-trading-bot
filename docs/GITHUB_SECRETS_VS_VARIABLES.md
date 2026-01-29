@@ -24,7 +24,7 @@
 - `SMTP_FROM_EMAIL` - From email (if sensitive)
 
 ### Use **Variables** for:
-- `BROKER_TYPE` - `alpaca` or `robinhood`
+- `BROKER_TYPE` - `alpaca`, `robinhood`, or `webull`
 - `ALPACA_BASE_URL` - `https://paper-api.alpaca.markets`
 - `INITIAL_CAPITAL` - `10000.0`
 - `EMAIL_ENABLED` - `true` or `false`
@@ -58,7 +58,7 @@
 
 ### Required Variables 📝
 - [ ] `LEADERBOARD_API_URL`
-- [ ] `BROKER_TYPE` (set to `alpaca` or `robinhood`)
+- [ ] `BROKER_TYPE` (set to `alpaca`, `robinhood`, or `webull`)
 - [ ] `ALPACA_BASE_URL` (set to `https://paper-api.alpaca.markets`)
 - [ ] `INITIAL_CAPITAL` (set to `10000.0`)
 
@@ -91,7 +91,7 @@
 
 **Solution:**
 1. Add `BROKER_TYPE` as a **Variable** (not Secret)
-2. Set value to exactly `alpaca` or `robinhood` (lowercase)
+2. Set value to exactly `alpaca`, `robinhood`, or `webull` (lowercase)
 
 ### ❌ Values showing as empty in logs
 

@@ -7,6 +7,7 @@ from ..config import get_config
 from .broker import Broker
 from .alpaca import AlpacaBroker
 from .robinhood import RobinhoodBroker
+from .webull import WebullBroker
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ def create_broker() -> Broker:
     Create a broker instance based on configuration.
     
     Returns:
-        Broker instance (AlpacaBroker or RobinhoodBroker)
+        Broker instance (AlpacaBroker, RobinhoodBroker, or WebullBroker)
         
     Raises:
         ValueError: If broker type is unsupported or credentials are missing
@@ -42,6 +43,17 @@ def create_broker() -> Broker:
             username=config.broker.robinhood_username,
             password=config.broker.robinhood_password,
             mfa_code=config.broker.robinhood_mfa_code,
+        )
+    
+    elif broker_type == "webull":
+        if not config.broker.webull_app_key or not config.broker.webull_app_secret:
+            raise ValueError("Webull App Key and App Secret are required. Get them from developer.webull.com")
+        
+        return WebullBroker(
+            app_key=config.broker.webull_app_key,
+            app_secret=config.broker.webull_app_secret,
+            account_id=config.broker.webull_account_id,
+            region=config.broker.webull_region,
         )
     
     else:

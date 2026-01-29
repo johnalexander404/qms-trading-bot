@@ -13,9 +13,26 @@ The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+IMPLIED, INCLUDING WITHOUT LIMITATION THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## Third-Party Dependencies
+
+This software includes third-party libraries that are subject to their own
+license terms. A complete list of dependencies and their licenses can be
+found in the README.md file under the "Dependencies" section.
+
+The following is a summary of third-party licenses used:
+
+- Apache License 2.0: alpaca-py, webull-python-sdk-core, webull-python-sdk-trade, requests, boto3, responses, freezegun
+- MIT License: robin-stocks, APScheduler, python-dotenv, pydantic, pytz, sendgrid, pytest, pytest-cov, pytest-mock
+- BSD-3-Clause: Flask
+
+All third-party licenses are compatible with this MIT License and are
+permissively licensed open-source software.

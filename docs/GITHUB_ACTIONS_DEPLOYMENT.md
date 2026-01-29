@@ -24,7 +24,7 @@ GitHub Actions can trigger your bot on a schedule (e.g., weekly) using the **ext
 **Required Secrets:**
 - `LEADERBOARD_API_URL` - Your leaderboard API endpoint
 - `LEADERBOARD_API_TOKEN` - Your leaderboard API token
-- `BROKER_TYPE` - Either `alpaca` or `robinhood`
+- `BROKER_TYPE` - Either `alpaca`, `robinhood`, or `webull`
 
 **Broker Secrets (Alpaca):**
 - `ALPACA_API_KEY`
@@ -35,6 +35,13 @@ GitHub Actions can trigger your bot on a schedule (e.g., weekly) using the **ext
 - `ROBINHOOD_USERNAME`
 - `ROBINHOOD_PASSWORD`
 - `ROBINHOOD_MFA_CODE` (if using 2FA)
+
+**Broker Secrets (Webull):**
+- Uses official Webull OpenAPI SDK - requires App Key/Secret from developer.webull.com
+- `WEBULL_APP_KEY`: Your Webull App Key
+- `WEBULL_APP_SECRET`: Your Webull App Secret
+- `WEBULL_ACCOUNT_ID` (optional)
+- `WEBULL_REGION` (optional, default: US)
 
 **Email Secrets (if enabled):**
 - `EMAIL_ENABLED` - Set to `true` or `false`

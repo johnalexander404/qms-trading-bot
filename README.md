@@ -5,7 +5,7 @@ Automated portfolio rebalancing bot that tracks a leaderboard and automatically 
 ## Features
 
 - **Automated Rebalancing**: Automatically rebalances portfolio to match leaderboard top 5 stocks
-- **Multiple Broker Support**: Works with Alpaca and Robinhood
+- **Multiple Broker Support**: Works with Alpaca, Robinhood, and Webull
 - **Flexible Scheduling**: Internal scheduler or external webhook triggers
 - **Email Notifications**: Get notified when trades complete (SMTP, SendGrid, or AWS SES)
 - **Docker Ready**: Containerized for easy deployment
@@ -16,7 +16,7 @@ Automated portfolio rebalancing bot that tracks a leaderboard and automatically 
 ### Prerequisites
 
 - Python 3.11+ or Docker
-- Broker account (Alpaca or Robinhood)
+- Broker account (Alpaca, Robinhood, or Webull)
 - Leaderboard API access
 
 ### Installation
@@ -56,7 +56,7 @@ All configuration is done via environment variables. See `.env.example` for all 
 
 - `LEADERBOARD_API_URL`: Your leaderboard API endpoint
 - `LEADERBOARD_API_TOKEN`: Authentication token for leaderboard API
-- `BROKER_TYPE`: `alpaca` or `robinhood`
+- `BROKER_TYPE`: `alpaca`, `robinhood`, or `webull`
 
 ### Broker Configuration
 
@@ -69,6 +69,13 @@ All configuration is done via environment variables. See `.env.example` for all 
 - `ROBINHOOD_USERNAME`: Your Robinhood username/email
 - `ROBINHOOD_PASSWORD`: Your Robinhood password
 - `ROBINHOOD_MFA_CODE`: Optional MFA code if 2FA is enabled
+
+**Webull:**
+- Uses official Webull OpenAPI SDK - requires App Key/Secret from [developer.webull.com](https://developer.webull.com)
+- `WEBULL_APP_KEY`: Your Webull App Key (obtained from developer portal)
+- `WEBULL_APP_SECRET`: Your Webull App Secret (obtained from developer portal)
+- `WEBULL_ACCOUNT_ID`: Optional account ID (will use first account if not provided)
+- `WEBULL_REGION`: Region code (US, HK, or JP) - default: US
 
 ### Email Configuration
 
@@ -218,9 +225,56 @@ pytest --cov=src --cov-report=html
 - Use webhook secrets for external scheduler mode
 - Review SECURITY.md for best practices
 
+## Dependencies
+
+This project uses the following third-party libraries:
+
+### Core Dependencies
+
+| Library | Version | License | Purpose |
+|---------|---------|---------|---------|
+| [alpaca-py](https://github.com/alpacahq/alpaca-py) | >=0.28.0 | Apache-2.0 | Alpaca broker integration |
+| [robin-stocks](https://github.com/jmfernandes/robin_stocks) | >=3.4.0 | MIT | Robinhood broker integration |
+| [webull-python-sdk-core](https://github.com/webull-inc/openapi-python-sdk) | >=0.1.18 | Apache-2.0 | Webull broker integration (core) |
+| [webull-python-sdk-trade](https://github.com/webull-inc/openapi-python-sdk) | >=0.1.14 | Apache-2.0 | Webull broker integration (trading) |
+| [APScheduler](https://github.com/agronholm/apscheduler) | >=3.10.0 | MIT | Task scheduling |
+| [Flask](https://github.com/pallets/flask) | >=3.0.0 | BSD-3-Clause | Web framework for webhook endpoints |
+| [requests](https://github.com/psf/requests) | >=2.31.0 | Apache-2.0 | HTTP library |
+| [python-dotenv](https://github.com/theskumar/python-dotenv) | >=1.0.0 | BSD | Environment variable management |
+| [pydantic](https://github.com/pydantic/pydantic) | >=2.0.0 | MIT | Data validation |
+| [pytz](https://github.com/stub42/pytz) | >=2024.1 | MIT | Timezone handling |
+
+### Optional Dependencies
+
+| Library | Version | License | Purpose |
+|---------|---------|---------|---------|
+| [sendgrid](https://github.com/sendgrid/sendgrid-python) | >=6.10.0 | MIT | SendGrid email provider |
+| [boto3](https://github.com/boto/boto3) | >=1.34.0 | Apache-2.0 | AWS SES email provider |
+
+### Development Dependencies
+
+| Library | Version | License | Purpose |
+|---------|---------|---------|---------|
+| [pytest](https://github.com/pytest-dev/pytest) | >=7.4.0 | MIT | Testing framework |
+| [pytest-cov](https://github.com/pytest-dev/pytest-cov) | >=4.1.0 | MIT | Coverage plugin |
+| [pytest-mock](https://github.com/pytest-dev/pytest-mock) | >=3.12.0 | MIT | Mocking plugin |
+| [responses](https://github.com/getsentry/responses) | >=0.24.0 | Apache-2.0 | HTTP mocking |
+| [freezegun](https://github.com/spulec/freezegun) | >=1.2.0 | Apache-2.0 | Time mocking |
+
+### License Notes
+
+- All dependencies are open-source and permissively licensed
+- This project is licensed under MIT License
+- Third-party library licenses are compatible with MIT
+- See individual library repositories for full license details
+
 ## License
 
 MIT License - see LICENSE file
+
+### Third-Party Licenses
+
+This project includes third-party libraries with their own licenses. All dependencies are listed above with their respective licenses. The use of these libraries is governed by their individual license terms, which are compatible with this project's MIT License.
 
 ## Contributing
 

@@ -12,7 +12,7 @@ load_dotenv()
 class BrokerConfig(BaseModel):
     """Broker configuration."""
 
-    broker_type: str = Field(default="alpaca", description="Broker type: 'alpaca' or 'robinhood'")
+    broker_type: str = Field(default="alpaca", description="Broker type: 'alpaca', 'robinhood', or 'webull'")
     
     # Alpaca credentials
     alpaca_api_key: Optional[str] = None
@@ -23,14 +23,21 @@ class BrokerConfig(BaseModel):
     robinhood_username: Optional[str] = None
     robinhood_password: Optional[str] = None
     robinhood_mfa_code: Optional[str] = None
+    
+    # Webull credentials (official OpenAPI SDK)
+    webull_app_key: Optional[str] = None
+    webull_app_secret: Optional[str] = None
+    webull_account_id: Optional[str] = Field(default=None, description="Webull account ID (optional, will use first account if not provided)")
+    webull_region: str = Field(default="US", description="Webull region: US, HK, or JP")
 
     @field_validator("broker_type")
     @classmethod
     def validate_broker_type(cls, v: str) -> str:
         """Validate broker type."""
         v_lower = v.lower()
-        if v_lower not in ["alpaca", "robinhood"]:
-            raise ValueError(f"Invalid broker type: {v}. Must be 'alpaca' or 'robinhood'")
+        valid_types = ["alpaca", "robinhood", "webull"]
+        if v_lower not in valid_types:
+            raise ValueError(f"Invalid broker type: {v}. Must be one of: {', '.join(valid_types)}")
         return v_lower
 
     def validate_broker_credentials(self) -> None:
@@ -41,6 +48,9 @@ class BrokerConfig(BaseModel):
         elif self.broker_type == "robinhood":
             if not self.robinhood_username or not self.robinhood_password:
                 raise ValueError("Robinhood username and password are required when BROKER_TYPE=robinhood")
+        elif self.broker_type == "webull":
+            if not self.webull_app_key or not self.webull_app_secret:
+                raise ValueError("Webull App Key and App Secret are required when BROKER_TYPE=webull. Get them from developer.webull.com")
 
 
 class EmailConfig(BaseModel):
@@ -143,6 +153,10 @@ class Config(BaseModel):
             robinhood_username=os.getenv("ROBINHOOD_USERNAME"),
             robinhood_password=os.getenv("ROBINHOOD_PASSWORD"),
             robinhood_mfa_code=os.getenv("ROBINHOOD_MFA_CODE"),
+            webull_app_key=os.getenv("WEBULL_APP_KEY"),
+            webull_app_secret=os.getenv("WEBULL_APP_SECRET"),
+            webull_account_id=os.getenv("WEBULL_ACCOUNT_ID"),
+            webull_region=os.getenv("WEBULL_REGION", "US"),
         )
         
         # Handle SMTP_PORT with proper default for empty strings
