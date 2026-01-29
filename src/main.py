@@ -297,21 +297,22 @@ class TradingBot:
                     logger.error(f"[{portfolio_name}] Error during rebalancing: {portfolio_error}")
                     # Continue with other portfolios
             
+            # Fetch ownership records for each portfolio (if persistence enabled) - needed for net_invested calculation
+            portfolio_ownership = {}
+            if self.persistence_manager:
+                for portfolio_name in portfolio_summaries.keys():
+                    portfolio_ownership[portfolio_name] = self.persistence_manager.get_portfolio_ownership_records(portfolio_name)
+            
             # Calculate performance metrics for each portfolio
             performances: Dict[str, PortfolioPerformance] = {}
             for portfolio_name, summary in portfolio_summaries.items():
-                performance = self._calculate_portfolio_performance(portfolio_name, summary)
+                ownership_records = portfolio_ownership.get(portfolio_name, {})
+                performance = self._calculate_portfolio_performance(portfolio_name, summary, ownership_records)
                 performances[portfolio_name] = performance
             
             # Create multi-portfolio summary
             if len(portfolio_summaries) > 1:
                 multi_summary = self._create_multi_portfolio_summary(portfolio_summaries, performances)
-                
-                # Fetch ownership records for each portfolio (if persistence enabled)
-                portfolio_ownership = {}
-                if self.persistence_manager:
-                    for portfolio_name in portfolio_summaries.keys():
-                        portfolio_ownership[portfolio_name] = self.persistence_manager.get_portfolio_ownership_records(portfolio_name)
                 
                 # Send email notification if enabled (only in real execution mode)
                 if not dry_run and self.email_notifier and self.config.email.recipient:
@@ -332,14 +333,22 @@ class TradingBot:
                     raise ValueError("No portfolio summaries generated. All portfolios may have failed during rebalancing.")
                 
                 summary = list(portfolio_summaries.values())[0]
+                portfolio_name = list(portfolio_summaries.keys())[0]
                 
-                # Fetch ownership records for single portfolio (if persistence enabled)
+                # Fetch ownership records for single portfolio (if persistence enabled) - needed for net_invested calculation
                 portfolio_ownership = None
-                if self.persistence_manager and portfolio_summaries:
-                    portfolio_name = list(portfolio_summaries.keys())[0]
+                ownership_records = {}
+                if self.persistence_manager:
                     ownership_records = self.persistence_manager.get_portfolio_ownership_records(portfolio_name)
                     if ownership_records:
                         portfolio_ownership = {portfolio_name: ownership_records}
+                
+                # Note: Performance was already calculated above in the loop, but if we're here it means
+                # we only have one portfolio, so the performance should already be in performances dict
+                # However, we need to ensure it was calculated with ownership records
+                if portfolio_name not in performances:
+                    performance = self._calculate_portfolio_performance(portfolio_name, summary, ownership_records)
+                    performances[portfolio_name] = performance
                 
                 # Send email notification if enabled (only in real execution mode)
                 if not dry_run and self.email_notifier and self.config.email.recipient:
@@ -372,22 +381,36 @@ class TradingBot:
     def _calculate_portfolio_performance(
         self,
         portfolio_name: str,
-        trade_summary: TradeSummary
+        trade_summary: TradeSummary,
+        ownership_records: Optional[Dict[str, Dict[str, float]]] = None
     ) -> PortfolioPerformance:
         """Calculate performance metrics for a portfolio."""
         initial_capital = trade_summary.initial_capital
         current_value = trade_summary.portfolio_value
-        total_cost = trade_summary.total_cost
-        total_proceeds = trade_summary.total_proceeds
+        # total_cost and total_proceeds from current run (for realized_pnl calculation)
+        current_run_cost = trade_summary.total_cost
+        current_run_proceeds = trade_summary.total_proceeds
         
-        net_invested = total_cost - total_proceeds
+        # Calculate net_invested: cost basis of current holdings
+        # If persistence is enabled, use ownership records (sum of total_cost for all owned symbols)
+        # Otherwise, fall back to trades from this run or initial capital
+        if ownership_records:
+            # Sum the total_cost (cost basis) for all current holdings
+            net_invested = sum(record.get('total_cost', 0.0) for record in ownership_records.values())
+        else:
+            # Fall back to trades from this run, or initial capital if no trades
+            net_invested = current_run_cost - current_run_proceeds
+            if net_invested == 0 and current_value > 0:
+                # If no trades this run but we have positions, use initial capital as proxy
+                net_invested = initial_capital
+        
         # Calculate returns based on initial capital
         total_return = current_value - initial_capital
         total_return_pct = (total_return / initial_capital * 100) if initial_capital > 0 else 0.0
-        # Unrealized P&L is the gain/loss on current holdings vs initial capital
-        # This represents the unrealized gain from the initial investment
-        unrealized_pnl = current_value - initial_capital
-        realized_pnl = total_proceeds - total_cost
+        # Unrealized P&L is the gain/loss on current holdings vs cost basis
+        unrealized_pnl = current_value - net_invested
+        # Realized P&L from current run's trades (note: this only reflects trades from this rebalancing run)
+        realized_pnl = current_run_proceeds - current_run_cost
         
         return PortfolioPerformance(
             portfolio_name=portfolio_name,
@@ -395,8 +418,8 @@ class TradingBot:
             current_value=current_value,
             total_return=total_return,
             total_return_pct=total_return_pct,
-            total_cost=total_cost,
-            total_proceeds=total_proceeds,
+            total_cost=initial_capital,  # Total cost = total initial investment
+            total_proceeds=current_run_proceeds,  # Proceeds from current run
             net_invested=net_invested,
             unrealized_pnl=unrealized_pnl,
             realized_pnl=realized_pnl,
@@ -410,7 +433,8 @@ class TradingBot:
         """Create multi-portfolio summary with aggregate metrics."""
         total_initial_capital = sum(p.initial_capital for p in performances.values())
         total_current_value = sum(p.current_value for p in performances.values())
-        total_net_invested = sum(p.net_invested for p in performances.values())
+        # Total Net Invested = Total Initial Capital (total amount initially invested)
+        total_net_invested = total_initial_capital
         # Calculate returns based on initial capital
         overall_return = total_current_value - total_initial_capital
         overall_return_pct = (overall_return / total_initial_capital * 100) if total_initial_capital > 0 else 0.0
