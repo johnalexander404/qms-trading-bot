@@ -16,7 +16,7 @@ GitHub Actions can trigger your bot on a schedule (e.g., weekly) using the **ext
 
 ### Step 1: Configure Secrets and Variables
 
-1. Go to your GitHub repository
+1. For the repo and go to your GitHub repository
 2. Navigate to **Settings** → **Secrets and variables** → **Actions**
 3. Add secrets (🔒) and variables (📝) as indicated below
 
