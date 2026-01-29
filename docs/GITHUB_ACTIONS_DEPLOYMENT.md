@@ -35,21 +35,21 @@ GitHub Actions can trigger your bot on a schedule (e.g., weekly) using the **ext
 
 **Broker-Specific Variables:**
 
-**Alpaca (🔒 Secrets - required if BROKER_TYPE=alpaca):**
-- `ALPACA_API_KEY` - Your Alpaca API key
-- `ALPACA_API_SECRET` - Your Alpaca API secret
-- `ALPACA_BASE_URL` - `https://paper-api.alpaca.markets` (paper) or `https://api.alpaca.markets` (live) - can be variable
-
-**Robinhood (🔒 Secrets - required if BROKER_TYPE=robinhood):**
-- `ROBINHOOD_USERNAME` - Your Robinhood username/email
-- `ROBINHOOD_PASSWORD` - Your Robinhood password
-- `ROBINHOOD_MFA_CODE` - Optional: MFA code if 2FA is enabled
-
-**Webull (🔒 Secrets - required if BROKER_TYPE=webull):**
-- `WEBULL_APP_KEY` - Your Webull App Key (get from [developer.webull.com](https://developer.webull.com))
-- `WEBULL_APP_SECRET` - Your Webull App Secret
-- `WEBULL_ACCOUNT_ID` - Optional: Account ID (will use first account if not provided) - can be variable
-- `WEBULL_REGION` - Optional: `US`, `HK`, or `JP` (default: `US`) - can be variable
+  **Alpaca (🔒 Secrets - required if BROKER_TYPE=alpaca):**
+  - `ALPACA_API_KEY` - Your Alpaca API key
+  - `ALPACA_API_SECRET` - Your Alpaca API secret
+  - `ALPACA_BASE_URL` - `https://paper-api.alpaca.markets` (paper) or `https://api.alpaca.markets` (live) - can be variable
+  
+  **Robinhood (🔒 Secrets - required if BROKER_TYPE=robinhood):**
+  - `ROBINHOOD_USERNAME` - Your Robinhood username/email
+  - `ROBINHOOD_PASSWORD` - Your Robinhood password
+  - `ROBINHOOD_MFA_CODE` - Optional: MFA code if 2FA is enabled
+  
+  **Webull (🔒 Secrets - required if BROKER_TYPE=webull):**
+  - `WEBULL_APP_KEY` - Your Webull App Key (get from [developer.webull.com](https://developer.webull.com))
+  - `WEBULL_APP_SECRET` - Your Webull App Secret
+  - `WEBULL_ACCOUNT_ID` - Optional: Account ID (will use first account if not provided) - can be variable
+  - `WEBULL_REGION` - Optional: `US`, `HK`, or `JP` (default: `US`) - can be variable
 
 **Trading Configuration (📝 Variables):**
 - `INITIAL_CAPITAL` - Initial capital amount (e.g., `10000.0`)
@@ -62,27 +62,27 @@ GitHub Actions can trigger your bot on a schedule (e.g., weekly) using the **ext
 
 **Email Configuration:**
 
-**Basic Email Settings (📝 Variables):**
-- `EMAIL_ENABLED` - Set to `true` or `false`
-- `EMAIL_RECIPIENT` - Recipient email address (🔒 Secret for privacy)
-- `EMAIL_PROVIDER` - `smtp`, `sendgrid`, or `ses`
-
-**SMTP Configuration (🔒 Secrets - required if EMAIL_PROVIDER=smtp):**
-- `SMTP_HOST` - e.g., `smtp.gmail.com` (can be variable)
-- `SMTP_PORT` - e.g., `587` (can be variable)
-- `SMTP_USERNAME` - Your email username
-- `SMTP_PASSWORD` - Your email app password
-- `SMTP_FROM_EMAIL` - From email address
-
-**SendGrid Configuration (🔒 Secrets - required if EMAIL_PROVIDER=sendgrid):**
-- `SENDGRID_API_KEY` - Your SendGrid API key
-- `SENDGRID_FROM_EMAIL` - Your verified SendGrid email (can be variable)
-
-**AWS SES Configuration (🔒 Secrets - required if EMAIL_PROVIDER=ses):**
-- `AWS_REGION` - e.g., `us-east-1` (can be variable)
-- `AWS_ACCESS_KEY_ID` - Your AWS access key
-- `AWS_SECRET_ACCESS_KEY` - Your AWS secret key
-- `SES_FROM_EMAIL` - Your verified SES email (can be variable)
+  **Basic Email Settings (📝 Variables):**
+  - `EMAIL_ENABLED` - Set to `true` or `false`
+  - `EMAIL_RECIPIENT` - Recipient email address (🔒 Secret for privacy)
+  - `EMAIL_PROVIDER` - `smtp`, `sendgrid`, or `ses`
+  
+  **SMTP Configuration (🔒 Secrets - required if EMAIL_PROVIDER=smtp):**
+  - `SMTP_HOST` - e.g., `smtp.gmail.com` (can be variable)
+  - `SMTP_PORT` - e.g., `587` (can be variable)
+  - `SMTP_USERNAME` - Your email username
+  - `SMTP_PASSWORD` - Your email app password
+  - `SMTP_FROM_EMAIL` - From email address
+  
+  **SendGrid Configuration (🔒 Secrets - required if EMAIL_PROVIDER=sendgrid):**
+  - `SENDGRID_API_KEY` - Your SendGrid API key
+  - `SENDGRID_FROM_EMAIL` - Your verified SendGrid email (can be variable)
+  
+  **AWS SES Configuration (🔒 Secrets - required if EMAIL_PROVIDER=ses):**
+  - `AWS_REGION` - e.g., `us-east-1` (can be variable)
+  - `AWS_ACCESS_KEY_ID` - Your AWS access key
+  - `AWS_SECRET_ACCESS_KEY` - Your AWS secret key
+  - `SES_FROM_EMAIL` - Your verified SES email (can be variable)
 
 **Persistence Configuration (Optional - 🔒 Secrets):**
 - `PERSISTENCE_ENABLED` - Set to `true` (optional - auto-enables if credentials are set) - can be variable
@@ -94,19 +94,19 @@ GitHub Actions can trigger your bot on a schedule (e.g., weekly) using the **ext
 
 **Multiple Portfolio Configuration (Optional):**
 
-**Default Behavior:**
-If no portfolio configuration is provided, the bot **defaults to trading SP400** (S&P 400 MidCap) with the `INITIAL_CAPITAL` amount.
-
-**Method 1: Environment Variables (📝 Variables):**
-- `TRADE_INDICES` - Comma-separated list (e.g., `SP400,SP500,SP600`)
-  - If not set, defaults to `SP400`
-- `INITIAL_CAPITAL_SP400` - Capital for SP400 portfolio
-- `INITIAL_CAPITAL_SP500` - Capital for SP500 portfolio
-- `INITIAL_CAPITAL_SP600` - Capital for SP600 portfolio
-- `INITIAL_CAPITAL_NDX` - Capital for NDX portfolio
-
-**Method 2: JSON Configuration (📝 Variable):**
-- `PORTFOLIO_CONFIG` - JSON string: `[{"portfolio_name":"SP400","index_id":"13","initial_capital":50000,"enabled":true}]`
+  **Default Behavior:**
+  If no portfolio configuration is provided, the bot **defaults to trading SP400** (S&P 400 MidCap) with the `INITIAL_CAPITAL` amount.
+  
+  **Method 1: Environment Variables (📝 Variables):**
+  - `TRADE_INDICES` - Comma-separated list (e.g., `SP400,SP500,SP600`)
+    - If not set, defaults to `SP400`
+  - `INITIAL_CAPITAL_SP400` - Capital for SP400 portfolio
+  - `INITIAL_CAPITAL_SP500` - Capital for SP500 portfolio
+  - `INITIAL_CAPITAL_SP600` - Capital for SP600 portfolio
+  - `INITIAL_CAPITAL_NDX` - Capital for NDX portfolio
+  
+  **Method 2: JSON Configuration (📝 Variable):**
+  - `PORTFOLIO_CONFIG` - JSON string: `[{"portfolio_name":"SP400","index_id":"13","initial_capital":50000,"enabled":true}]`
 
 **Note:** To explicitly configure a single SP400 portfolio, you can either:
 - Leave `TRADE_INDICES` unset (defaults to SP400)
