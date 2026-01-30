@@ -30,7 +30,7 @@ This guide will walk you through creating a Google App Password, which is requir
 2. Under **"How you sign in to Google"**, find **"2-Step Verification"**
 3. Click on **"2-Step Verification"** (not the toggle, but the text/link)
 4. Scroll down to the bottom of the 2-Step Verification page
-5. Look for the **"App passwords"** section
+5. Look for the **"App passwords"** section [https://myaccount.google.com/apppasswords]
 6. Click on **"App passwords"**
 
    > **Note:** If you don't see "App passwords", make sure:
