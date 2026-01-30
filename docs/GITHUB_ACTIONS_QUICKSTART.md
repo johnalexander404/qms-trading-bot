@@ -37,7 +37,7 @@ Get your QMS Trading Bot running on GitHub Actions in 5 minutes!
    Value: your_alpaca_secret
 
    ```
-   **Fill following variables if you need to maintain history of trades separate from the trading partner.**
+   **Fill following secrets if you need to maintain history of trades separate from the trading partner.**
    ```
    
    Name: FIREBASE_PROJECT_ID (optional - for persistence but needed for trading multiple portfolios)
