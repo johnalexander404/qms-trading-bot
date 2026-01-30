@@ -42,7 +42,7 @@ Get your QMS Trading Bot running on GitHub Actions in 5 minutes!
    Name: SMTP_USERNAME (optional)
    Value: your_gmail@gmail.com
    
-   Name: SMTP_PASSWORD (optional)
+   Name: SMTP_PASSWORD (optional) See [Gmail App Password Guide](GMAIL_APP_PASSWORD_SETUP.md)
    Value: your_app_password
    
    Name: SMTP_FROM_EMAIL (optional)
