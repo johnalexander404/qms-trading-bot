@@ -33,10 +33,11 @@ class TradeSummary:
     total_cost: float
     total_proceeds: float
     final_allocations: List[Allocation]
-    portfolio_value: float
+    portfolio_value: float  # Market value of current holdings (does not include cash balance)
     portfolio_name: str = "SP400"  # Default for backward compatibility
     initial_capital: float = 0.0  # Track initial capital for performance calculation
     failed_trades: List[dict] = field(default_factory=list)  # List of failed trades with error messages
+    cash_balance: float = 0.0  # Portfolio's cash balance (initial_capital + cumulative realized P&L)
 
 
 @dataclass

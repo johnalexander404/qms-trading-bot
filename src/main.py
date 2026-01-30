@@ -360,13 +360,15 @@ class TradingBot:
                 for name in portfolio_summaries.keys():
                     perf = pre_trade_performances.get(name)
                     if perf:
+                        # portfolio_value should be holdings-only (market value), not including cash balance
+                        pre_trade_holdings = sum(alloc.market_value for alloc in pre_trade_allocations.get(name, []))
                         pre_trade_summaries[name] = TradeSummary(
                             buys=[],
                             sells=[],
                             total_cost=0.0,
                             total_proceeds=0.0,
                             final_allocations=pre_trade_allocations.get(name, []),
-                            portfolio_value=perf.current_value,
+                            portfolio_value=pre_trade_holdings,  # Holdings-only, cash balance calculated separately
                             portfolio_name=name,
                             initial_capital=perf.initial_capital,
                         )
@@ -447,12 +449,39 @@ class TradingBot:
         trade_summary: TradeSummary,
         ownership_records: Optional[Dict[str, Dict[str, float]]] = None
     ) -> PortfolioPerformance:
-        """Calculate performance metrics for a portfolio."""
+        """
+        Calculate performance metrics for a portfolio.
+        
+        P&L is calculated based on PRE-TRADE state (before queued trades execute).
+        Current run's trades are excluded from realized P&L calculation.
+        """
         initial_capital = trade_summary.initial_capital
-        current_value = trade_summary.portfolio_value
-        # total_cost and total_proceeds from current run (for realized_pnl calculation)
+        current_holdings = trade_summary.portfolio_value  # Market value of current holdings
+        # total_cost and total_proceeds from current run (these are queued, not executed)
         current_run_cost = trade_summary.total_cost
         current_run_proceeds = trade_summary.total_proceeds
+        
+        # Calculate cumulative realized P&L from ALL historical trades (EXCLUDING current run)
+        # Current run's trades are queued and haven't executed, so they don't affect P&L
+        cumulative_realized_pnl = 0.0
+        if self.persistence_manager:
+            try:
+                all_trades = self.persistence_manager.get_all_trades_for_portfolio(portfolio_name)
+                # Sum all historical SELL proceeds minus all historical BUY costs
+                total_buy_costs = sum(trade['total'] for trade in all_trades if trade['action'] == 'BUY')
+                total_sell_proceeds = sum(trade['total'] for trade in all_trades if trade['action'] == 'SELL')
+                cumulative_realized_pnl = total_sell_proceeds - total_buy_costs
+            except Exception as e:
+                logger.warning(f"[{portfolio_name}] Error getting historical trades for P&L calculation: {e}")
+                cumulative_realized_pnl = 0.0
+        
+        # Calculate portfolio cash balance (pre-trade)
+        # Cash = initial_capital + cumulative realized P&L from historical trades
+        portfolio_cash_balance = initial_capital + cumulative_realized_pnl
+        
+        # Calculate total current value (pre-trade)
+        # Current value = current holdings + cash balance
+        current_value = current_holdings + portfolio_cash_balance
         
         # Calculate net_invested: cost basis of current holdings
         # If persistence is enabled, use ownership records (sum of total_cost for all owned symbols)
@@ -463,29 +492,31 @@ class TradingBot:
         else:
             # Fall back to trades from this run, or initial capital if no trades
             net_invested = current_run_cost - current_run_proceeds
-            if net_invested == 0 and current_value > 0:
+            if net_invested == 0 and current_holdings > 0:
                 # If no trades this run but we have positions, use initial capital as proxy
                 net_invested = initial_capital
         
-        # Calculate returns based on initial capital
+        # Calculate returns based on initial capital (pre-trade P&L)
         total_return = current_value - initial_capital
         total_return_pct = (total_return / initial_capital * 100) if initial_capital > 0 else 0.0
+        
         # Unrealized P&L is the gain/loss on current holdings vs cost basis
-        unrealized_pnl = current_value - net_invested
-        # Realized P&L from current run's trades (note: this only reflects trades from this rebalancing run)
-        realized_pnl = current_run_proceeds - current_run_cost
+        unrealized_pnl = current_holdings - net_invested
+        
+        # Realized P&L is cumulative from all historical trades (excluding current run)
+        realized_pnl = cumulative_realized_pnl
         
         return PortfolioPerformance(
             portfolio_name=portfolio_name,
             initial_capital=initial_capital,
-            current_value=current_value,
+            current_value=current_value,  # Includes cash balance
             total_return=total_return,
             total_return_pct=total_return_pct,
             total_cost=initial_capital,  # Total cost = total initial investment
-            total_proceeds=current_run_proceeds,  # Proceeds from current run
+            total_proceeds=current_run_proceeds,  # Proceeds from current run (for reference, not used in P&L)
             net_invested=net_invested,
             unrealized_pnl=unrealized_pnl,
-            realized_pnl=realized_pnl,
+            realized_pnl=realized_pnl,  # Cumulative from all historical trades
         )
     
     def _create_multi_portfolio_summary(

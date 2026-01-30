@@ -959,3 +959,50 @@ class PersistenceManager:
             'updated': updated_count,
             'recalculated': recalculated_count
         }
+    
+    def get_all_trades_for_portfolio(self, portfolio_name: str) -> List[dict]:
+        """
+        Get all historical trades for a portfolio from Firestore.
+        
+        Returns all trades (BUY and SELL) for the given portfolio, excluding
+        unfilled trades or trades from the current run that haven't been recorded yet.
+        
+        Args:
+            portfolio_name: Portfolio name to get trades for
+            
+        Returns:
+            List of trade dictionaries with keys: action, total, quantity, price, timestamp
+        """
+        trades_ref = self.db.collection('trades')
+        
+        if FieldFilter:
+            query = trades_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name))
+        else:
+            query = trades_ref.where('portfolio_name', '==', portfolio_name)
+        
+        trades = []
+        for doc in query.stream():
+            data = doc.to_dict()
+            action = data.get('action', '').upper()
+            total = data.get('total', 0.0)
+            quantity = data.get('quantity', 0.0)
+            price = data.get('price', 0.0)
+            timestamp = data.get('timestamp')
+            reconciliation_status = data.get('reconciliation_status')
+            
+            # Only include trades with valid fill data
+            # Exclude unfilled trades (they haven't executed yet)
+            if action in ['BUY', 'SELL'] and total > 0 and quantity > 0 and price > 0:
+                # Skip unfilled trades - they're from current run and haven't executed
+                # Include trades with None reconciliation_status (filled but not yet reconciled)
+                # or 'filled' status, but exclude 'unfilled'
+                if reconciliation_status is None or reconciliation_status != 'unfilled':
+                    trades.append({
+                        'action': action,
+                        'total': total,
+                        'quantity': quantity,
+                        'price': price,
+                        'timestamp': timestamp,
+                    })
+        
+        return trades
