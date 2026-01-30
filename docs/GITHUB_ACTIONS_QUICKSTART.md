@@ -47,6 +47,7 @@ Get your QMS Trading Bot running on GitHub Actions in 5 minutes!
    Value: {"type":"service_account","project_id":"...","private_key":"..."}
    ```
       > 💡 **For FIREBASE_CREDENTIALS_JSON:** Copy the entire content of your Firebase service account JSON file. GitHub handles multi-line secrets automatically.
+   
    **If you want summary emails sent to you after trades execute add the following to secrets.**
    ```
    Name: EMAIL_RECIPIENT (optional)
