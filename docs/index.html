@@ -301,6 +301,95 @@
         .hidden {
             display: none !important;
         }
+
+        .mode-toggle {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .radio-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 0.75rem 1rem;
+            border: 2px solid var(--gray-200);
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .radio-label:has(input:checked) {
+            border-color: var(--primary);
+            background: #eff6ff;
+        }
+
+        .radio-label input[type="radio"] {
+            margin-right: 0.5rem;
+        }
+
+        .radio-text {
+            font-weight: 500;
+        }
+
+        .portfolio-card {
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            position: relative;
+        }
+
+        .portfolio-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .portfolio-card-header h4 {
+            margin: 0;
+            color: var(--gray-700);
+            font-size: 0.95rem;
+        }
+
+        .remove-portfolio-btn {
+            background: none;
+            border: none;
+            color: var(--danger);
+            cursor: pointer;
+            font-size: 1.25rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            line-height: 1;
+        }
+
+        .remove-portfolio-btn:hover {
+            background: #fef2f2;
+        }
+
+        .portfolio-card .form-row {
+            margin-bottom: 0.75rem;
+        }
+
+        .portfolio-card .form-group {
+            margin-bottom: 0.75rem;
+        }
+
+        .portfolio-card .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .portfolio-card label {
+            font-size: 0.875rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .portfolio-card input,
+        .portfolio-card select {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
@@ -407,49 +496,72 @@
                     <span class="badge badge-required">Required</span>
                 </div>
                 <div class="card-body">
+                    <!-- Portfolio Mode Selection -->
                     <div class="form-group">
-                        <label>Trade Indices <span class="hint">(comma-separated: SP400, SP500, SP600, NDX)</span></label>
-                        <input type="text" name="TRADE_INDICES" value="SP400" placeholder="SP400, SP500">
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Initial Capital (Default)</label>
-                            <input type="number" name="INITIAL_CAPITAL" value="10000" step="100">
-                        </div>
-                        <div class="form-group">
-                            <label>Force Run <span class="hint">(for manual triggers)</span></label>
-                            <select name="FORCE_RUN">
-                                <option value="false">Dry Run (default)</option>
-                                <option value="true">Execute Trades</option>
-                            </select>
+                        <label>Portfolio Mode</label>
+                        <div class="mode-toggle">
+                            <label class="radio-label">
+                                <input type="radio" name="portfolioMode" value="single" checked>
+                                <span class="radio-text">Single Portfolio</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="portfolioMode" value="multiple">
+                                <span class="radio-text">Multiple Portfolios</span>
+                            </label>
                         </div>
                     </div>
 
-                    <details style="margin-top: 1rem;">
-                        <summary style="cursor: pointer; color: var(--primary);">Per-Index Capital (optional)</summary>
-                        <div style="margin-top: 1rem;">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>SP400 Capital</label>
-                                    <input type="number" name="INITIAL_CAPITAL_SP400" placeholder="10000" step="100">
-                                </div>
-                                <div class="form-group">
-                                    <label>SP500 Capital</label>
-                                    <input type="number" name="INITIAL_CAPITAL_SP500" placeholder="10000" step="100">
-                                </div>
+                    <!-- Single Portfolio Mode -->
+                    <div id="singlePortfolioFields">
+                        <div class="form-group">
+                            <label>Portfolio Index</label>
+                            <select name="TRADE_INDEX_SINGLE">
+                                <option value="SP400">S&P 400 (MidCap)</option>
+                                <option value="SP500">S&P 500 (LargeCap)</option>
+                                <option value="SP600">S&P 600 (SmallCap)</option>
+                                <option value="NDX">NASDAQ 100</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Initial Capital</label>
+                                <input type="number" name="INITIAL_CAPITAL_SINGLE" value="10000" step="100" min="100">
                             </div>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>SP600 Capital</label>
-                                    <input type="number" name="INITIAL_CAPITAL_SP600" placeholder="10000" step="100">
-                                </div>
-                                <div class="form-group">
-                                    <label>NDX Capital</label>
-                                    <input type="number" name="INITIAL_CAPITAL_NDX" placeholder="10000" step="100">
-                                </div>
+                            <div class="form-group">
+                                <label>Stock Count <span class="hint">(how many stocks to hold)</span></label>
+                                <input type="number" name="STOCKCOUNT_SINGLE" value="10" min="1" max="100">
                             </div>
                         </div>
-                    </details>
+                        <div class="form-group">
+                            <label>Slack <span class="hint">(rank threshold before selling, default: stockcount)</span></label>
+                            <input type="number" name="SLACK_SINGLE" placeholder="Same as stock count" min="0" max="100">
+                        </div>
+                    </div>
+
+                    <!-- Multiple Portfolios Mode -->
+                    <div id="multiplePortfolioFields" class="hidden">
+                        <div class="info-box" style="margin-bottom: 1rem;">
+                            Configure multiple portfolios to trade different indices with separate capital allocations.
+                        </div>
+
+                        <div id="portfolioList">
+                            <!-- Portfolios will be added here dynamically -->
+                        </div>
+
+                        <button type="button" class="btn btn-secondary" onclick="addPortfolio()" style="margin-top: 0.5rem;">
+                            + Add Portfolio
+                        </button>
+                    </div>
+
+                    <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--gray-200);">
+
+                    <div class="form-group">
+                        <label>Force Run <span class="hint">(for manual triggers)</span></label>
+                        <select name="FORCE_RUN">
+                            <option value="false">Dry Run (default)</option>
+                            <option value="true">Execute Trades</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -601,6 +713,9 @@
     </div>
 
     <script>
+        // Portfolio counter for unique IDs
+        let portfolioCounter = 0;
+
         // Broker type switching
         document.getElementById('brokerType').addEventListener('change', function() {
             document.getElementById('alpacaFields').classList.add('hidden');
@@ -608,6 +723,103 @@
             document.getElementById('webullFields').classList.add('hidden');
             document.getElementById(this.value + 'Fields').classList.remove('hidden');
         });
+
+        // Portfolio mode switching
+        document.querySelectorAll('input[name="portfolioMode"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                const isSingle = this.value === 'single';
+                document.getElementById('singlePortfolioFields').classList.toggle('hidden', !isSingle);
+                document.getElementById('multiplePortfolioFields').classList.toggle('hidden', isSingle);
+
+                // Add initial portfolio if switching to multiple and list is empty
+                if (!isSingle && document.getElementById('portfolioList').children.length === 0) {
+                    addPortfolio();
+                }
+            });
+        });
+
+        // Add portfolio card
+        function addPortfolio(defaults = {}) {
+            const portfolioList = document.getElementById('portfolioList');
+            const portfolioId = ++portfolioCounter;
+
+            const card = document.createElement('div');
+            card.className = 'portfolio-card';
+            card.id = `portfolio-${portfolioId}`;
+            card.innerHTML = `
+                <div class="portfolio-card-header">
+                    <h4>Portfolio #${portfolioId}</h4>
+                    <button type="button" class="remove-portfolio-btn" onclick="removePortfolio(${portfolioId})" title="Remove portfolio">&times;</button>
+                </div>
+                <div class="form-group">
+                    <label>Index</label>
+                    <select name="portfolio_${portfolioId}_index">
+                        <option value="SP400" ${defaults.index === 'SP400' ? 'selected' : ''}>S&P 400 (MidCap)</option>
+                        <option value="SP500" ${defaults.index === 'SP500' ? 'selected' : ''}>S&P 500 (LargeCap)</option>
+                        <option value="SP600" ${defaults.index === 'SP600' ? 'selected' : ''}>S&P 600 (SmallCap)</option>
+                        <option value="NDX" ${defaults.index === 'NDX' ? 'selected' : ''}>NASDAQ 100</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Initial Capital</label>
+                        <input type="number" name="portfolio_${portfolioId}_capital" value="${defaults.capital || 10000}" step="100" min="100">
+                    </div>
+                    <div class="form-group">
+                        <label>Stock Count</label>
+                        <input type="number" name="portfolio_${portfolioId}_stockcount" value="${defaults.stockcount || 10}" min="1" max="100">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Slack <span class="hint">(optional, defaults to stock count)</span></label>
+                    <input type="number" name="portfolio_${portfolioId}_slack" placeholder="Same as stock count" min="0" max="100" value="${defaults.slack || ''}">
+                </div>
+            `;
+            portfolioList.appendChild(card);
+            updateRemoveButtons();
+        }
+
+        // Remove portfolio card
+        function removePortfolio(id) {
+            const card = document.getElementById(`portfolio-${id}`);
+            if (card) {
+                card.remove();
+                updateRemoveButtons();
+            }
+        }
+
+        // Update remove buttons visibility (hide if only one portfolio)
+        function updateRemoveButtons() {
+            const cards = document.querySelectorAll('.portfolio-card');
+            cards.forEach(card => {
+                const btn = card.querySelector('.remove-portfolio-btn');
+                btn.style.display = cards.length > 1 ? 'block' : 'none';
+            });
+        }
+
+        // Get all portfolios data
+        function getPortfoliosData() {
+            const portfolios = [];
+            const cards = document.querySelectorAll('.portfolio-card');
+
+            cards.forEach(card => {
+                const id = card.id.replace('portfolio-', '');
+                const index = card.querySelector(`[name="portfolio_${id}_index"]`).value;
+                const capital = card.querySelector(`[name="portfolio_${id}_capital"]`).value;
+                const stockcount = card.querySelector(`[name="portfolio_${id}_stockcount"]`).value;
+                const slack = card.querySelector(`[name="portfolio_${id}_slack"]`).value;
+
+                portfolios.push({
+                    portfolio_name: index,
+                    initial_capital: parseFloat(capital) || 10000,
+                    stockcount: parseInt(stockcount) || 10,
+                    slack: slack ? parseInt(slack) : null,
+                    enabled: true
+                });
+            });
+
+            return portfolios;
+        }
 
         // Email toggle
         document.getElementById('emailEnabled').addEventListener('change', function() {
@@ -639,6 +851,7 @@
             const form = document.getElementById('setupForm');
             const formData = new FormData(form);
             const repo = formData.get('GITHUB_REPO');
+            const isSingleMode = formData.get('portfolioMode') === 'single';
 
             // Define which fields are secrets vs variables
             const secrets = [
@@ -651,9 +864,7 @@
             ];
 
             const variables = [
-                'BROKER_TYPE', 'ALPACA_BASE_URL',
-                'INITIAL_CAPITAL', 'TRADE_INDICES', 'FORCE_RUN',
-                'INITIAL_CAPITAL_SP400', 'INITIAL_CAPITAL_SP500', 'INITIAL_CAPITAL_SP600', 'INITIAL_CAPITAL_NDX',
+                'BROKER_TYPE', 'ALPACA_BASE_URL', 'FORCE_RUN',
                 'EMAIL_ENABLED', 'EMAIL_PROVIDER', 'SMTP_HOST', 'SMTP_PORT',
                 'PERSISTENCE_ENABLED'
             ];
@@ -677,13 +888,67 @@
             // Generate variable commands
             variables.forEach(key => {
                 let value = formData.get(key);
-                if (key === 'EMAIL_ENABLED' || key === 'PERSISTENCE_ENABLED') {
-                    value = document.getElementById(key.toLowerCase().replace('_', '')).checked ? 'true' : 'false';
+                if (key === 'EMAIL_ENABLED') {
+                    value = document.getElementById('emailEnabled').checked ? 'true' : 'false';
+                } else if (key === 'PERSISTENCE_ENABLED') {
+                    value = document.getElementById('persistenceEnabled').checked ? 'true' : 'false';
                 }
                 if (value && value.trim()) {
                     variableCommands.push(`gh variable set ${key} --repo ${repo} --body '${value}'`);
                 }
             });
+
+            // Handle portfolio configuration based on mode
+            if (isSingleMode) {
+                // Single portfolio mode
+                const index = formData.get('TRADE_INDEX_SINGLE');
+                const capital = formData.get('INITIAL_CAPITAL_SINGLE');
+                const stockcount = formData.get('STOCKCOUNT_SINGLE');
+                const slack = formData.get('SLACK_SINGLE');
+
+                variableCommands.push(`gh variable set TRADE_INDICES --repo ${repo} --body '${index}'`);
+                variableCommands.push(`gh variable set INITIAL_CAPITAL --repo ${repo} --body '${capital}'`);
+
+                if (stockcount) {
+                    variableCommands.push(`gh variable set DEFAULT_STOCKCOUNT --repo ${repo} --body '${stockcount}'`);
+                }
+                if (slack) {
+                    variableCommands.push(`gh variable set DEFAULT_SLACK --repo ${repo} --body '${slack}'`);
+                }
+            } else {
+                // Multiple portfolios mode - use PORTFOLIO_CONFIG JSON
+                const portfolios = getPortfoliosData();
+
+                // Validate no duplicate indices
+                const indices = portfolios.map(p => p.portfolio_name);
+                const duplicates = indices.filter((item, index) => indices.indexOf(item) !== index);
+                if (duplicates.length > 0) {
+                    alert(`Error: Duplicate portfolio indices found: ${duplicates.join(', ')}. Each index can only be used once.`);
+                    return;
+                }
+
+                // Build PORTFOLIO_CONFIG JSON
+                const portfolioConfig = portfolios.map(p => {
+                    const config = {
+                        portfolio_name: p.portfolio_name,
+                        initial_capital: p.initial_capital,
+                        stockcount: p.stockcount,
+                        enabled: true
+                    };
+                    if (p.slack !== null) {
+                        config.slack = p.slack;
+                    }
+                    return config;
+                });
+
+                const configJson = JSON.stringify(portfolioConfig);
+                const escapedJson = configJson.replace(/'/g, "'\\''");
+                variableCommands.push(`gh variable set PORTFOLIO_CONFIG --repo ${repo} --body '${escapedJson}'`);
+
+                // Also set TRADE_INDICES for backwards compatibility
+                const tradeIndices = portfolios.map(p => p.portfolio_name).join(',');
+                variableCommands.push(`gh variable set TRADE_INDICES --repo ${repo} --body '${tradeIndices}'`);
+            }
 
             // Display commands
             document.getElementById('secretsCode').textContent = secretCommands.join('\n') || '# No secrets to set';
@@ -711,6 +976,7 @@
         function downloadEnvFile() {
             const form = document.getElementById('setupForm');
             const formData = new FormData(form);
+            const isSingleMode = formData.get('portfolioMode') === 'single';
 
             let envContent = '# QMS Trading Bot Configuration\n';
             envContent += '# Generated from setup wizard\n\n';
@@ -726,8 +992,50 @@
             envContent += `ALPACA_BASE_URL=${formData.get('ALPACA_BASE_URL') || 'https://paper-api.alpaca.markets'}\n\n`;
 
             envContent += '# Trading Configuration\n';
-            envContent += `INITIAL_CAPITAL=${formData.get('INITIAL_CAPITAL') || '10000'}\n`;
-            envContent += `TRADE_INDICES=${formData.get('TRADE_INDICES') || 'SP400'}\n\n`;
+
+            if (isSingleMode) {
+                // Single portfolio mode
+                const index = formData.get('TRADE_INDEX_SINGLE') || 'SP400';
+                const capital = formData.get('INITIAL_CAPITAL_SINGLE') || '10000';
+                const stockcount = formData.get('STOCKCOUNT_SINGLE') || '10';
+                const slack = formData.get('SLACK_SINGLE');
+
+                envContent += `TRADE_INDICES=${index}\n`;
+                envContent += `INITIAL_CAPITAL=${capital}\n`;
+                envContent += `DEFAULT_STOCKCOUNT=${stockcount}\n`;
+                if (slack) {
+                    envContent += `DEFAULT_SLACK=${slack}\n`;
+                }
+            } else {
+                // Multiple portfolios mode
+                const portfolios = getPortfoliosData();
+                const tradeIndices = portfolios.map(p => p.portfolio_name).join(',');
+
+                envContent += `TRADE_INDICES=${tradeIndices}\n`;
+
+                // Build PORTFOLIO_CONFIG JSON
+                const portfolioConfig = portfolios.map(p => {
+                    const config = {
+                        portfolio_name: p.portfolio_name,
+                        initial_capital: p.initial_capital,
+                        stockcount: p.stockcount,
+                        enabled: true
+                    };
+                    if (p.slack !== null) {
+                        config.slack = p.slack;
+                    }
+                    return config;
+                });
+
+                envContent += `PORTFOLIO_CONFIG='${JSON.stringify(portfolioConfig)}'\n`;
+
+                // Also add per-portfolio capital for backwards compatibility
+                portfolios.forEach(p => {
+                    envContent += `INITIAL_CAPITAL_${p.portfolio_name}=${p.initial_capital}\n`;
+                });
+            }
+
+            envContent += '\n';
 
             const emailEnabled = document.getElementById('emailEnabled').checked;
             envContent += '# Email Configuration\n';
