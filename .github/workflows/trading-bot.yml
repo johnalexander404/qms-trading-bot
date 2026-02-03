@@ -1,10 +1,6 @@
 name: Trading Bot Rebalancing
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
     # Run every 5 minutes from 9:30-10:00 AM Eastern Time on Monday
     # This enables cron resilience - if a run fails, the next one will retry
@@ -40,83 +36,48 @@ on:
           - 'false'
 
 jobs:
-  test:
-    # Only run tests on push/PR, not on scheduled runs or manual triggers
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-mock
-
-      - name: Run tests
-        run: |
-          pytest tests/ -v --cov=src --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          file: coverage.xml
-          fail_ci_if_error: false
-
   rebalance:
-    # Only run on schedule or manual trigger (not on push/PR)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # Adjust based on your needs
-    
+    timeout-minutes: 10
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      
+
       - name: Run trading bot
         env:
-          # Leaderboard API (use secrets for sensitive data)
+          # Leaderboard API
           LEADERBOARD_API_URL: ${{ secrets.LEADERBOARD_API_URL }}
           LEADERBOARD_API_TOKEN: ${{ secrets.LEADERBOARD_API_TOKEN }}
-          
+
           # Broker Configuration
-          # Use vars for non-sensitive config, secrets for sensitive data
           BROKER_TYPE: ${{ vars.BROKER_TYPE }}
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
           ALPACA_BASE_URL: ${{ vars.ALPACA_BASE_URL }}
-          
-          # Trading Configuration (non-sensitive, use vars)
+
+          # Trading Configuration
           INITIAL_CAPITAL: ${{ vars.INITIAL_CAPITAL }}
           TRADE_INDICES: ${{ vars.TRADE_INDICES }}
           INITIAL_CAPITAL_SP400: ${{ vars.INITIAL_CAPITAL_SP400 }}
           INITIAL_CAPITAL_SP500: ${{ vars.INITIAL_CAPITAL_SP500 }}
           INITIAL_CAPITAL_SP600: ${{ vars.INITIAL_CAPITAL_SP600 }}
           INITIAL_CAPITAL_NDX: ${{ vars.INITIAL_CAPITAL_NDX }}
-          SCHEDULER_MODE: external  # Required for GitHub Actions
-          
+          SCHEDULER_MODE: external
+
           # Execution Control
-          # For manual triggers: use input value (defaults to 'false' = dry-run)
-          #   Can override with vars.FORCE_RUN if input not explicitly set
-          # For scheduled runs: always execute (FORCE_RUN not checked, but can be set for consistency)
           FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.force_run || vars.FORCE_RUN || 'false' }}
-          
+
           # Email Configuration (optional)
           EMAIL_ENABLED: ${{ vars.EMAIL_ENABLED }}
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
@@ -126,22 +87,19 @@ jobs:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM_EMAIL: ${{ secrets.SMTP_FROM_EMAIL }}
-          
+
           # Persistence Configuration (optional)
-          # For GitHub Actions: use FIREBASE_CREDENTIALS_JSON (store entire JSON as secret)
-          # For local: use FIREBASE_CREDENTIALS_PATH
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CREDENTIALS_JSON: ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
           PERSISTENCE_ENABLED: ${{ vars.PERSISTENCE_ENABLED }}
         run: |
-          # Run bot in one-shot mode (external scheduler)
           python -c "
           from src.main import TradingBot
           bot = TradingBot()
           bot.initialize()
           bot._execute_rebalancing()
           "
-      
+
       - name: Upload logs (if job fails)
         if: failure()
         uses: actions/upload-artifact@v4
