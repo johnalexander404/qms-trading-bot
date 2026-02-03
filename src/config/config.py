@@ -147,11 +147,13 @@ class PersistenceConfig(BaseModel):
 
 class PortfolioConfig(BaseModel):
     """Portfolio configuration for multi-portfolio support."""
-    
+
     portfolio_name: str = Field(description="Portfolio name (e.g., 'SP400', 'SP500')")
     index_id: str = Field(description="Internal API index ID (e.g., '13', '9')")
     initial_capital: float = Field(description="Initial capital for this portfolio")
     enabled: bool = Field(default=True, description="Whether this portfolio is enabled")
+    stockcount: int = Field(default=5, description="Number of stocks to hold in portfolio")
+    slack: int = Field(default=0, description="Position buffer - sell when rank > stockcount + slack")
 
 
 class Config(BaseModel):
@@ -160,25 +162,29 @@ class Config(BaseModel):
     # Leaderboard API
     leaderboard_api_url: str = Field(description="Leaderboard API endpoint")
     leaderboard_api_token: str = Field(description="Leaderboard API authentication token")
-    
+
     # Trading
     initial_capital: float = Field(default=10000.0, description="Initial capital for portfolio allocation")
-    
+
     # Multi-portfolio configuration
     portfolios: List[PortfolioConfig] = Field(default_factory=list, description="List of portfolio configurations")
-    
+
+    # Default portfolio parameters (used when not specified per-portfolio)
+    default_stockcount: int = Field(default=5, description="Default number of stocks per portfolio")
+    default_slack: int = Field(default=0, description="Default position slack for all portfolios")
+
     # Broker configuration
     broker: BrokerConfig = Field(default_factory=BrokerConfig)
-    
+
     # Email configuration
     email: EmailConfig = Field(default_factory=EmailConfig)
-    
+
     # Scheduler configuration
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
-    
+
     # Persistence configuration
     persistence: PersistenceConfig = Field(default_factory=PersistenceConfig)
-    
+
     # Security
     mask_financial_amounts: bool = Field(default=True, description="Mask financial amounts in logs")
 
@@ -252,7 +258,14 @@ class Config(BaseModel):
         # Handle INITIAL_CAPITAL with proper default for empty strings
         initial_capital_str = os.getenv("INITIAL_CAPITAL", "10000.0")
         initial_capital = float(initial_capital_str) if initial_capital_str and initial_capital_str.strip() else 10000.0
-        
+
+        # Handle DEFAULT_STOCKCOUNT and DEFAULT_SLACK
+        default_stockcount_str = os.getenv("DEFAULT_STOCKCOUNT", "5")
+        default_stockcount = int(default_stockcount_str) if default_stockcount_str and default_stockcount_str.strip() else 5
+
+        default_slack_str = os.getenv("DEFAULT_SLACK", "0")
+        default_slack = int(default_slack_str) if default_slack_str and default_slack_str.strip() else 0
+
         # Parse portfolio configuration
         portfolios = cls._parse_portfolio_config(initial_capital)
         
@@ -265,6 +278,8 @@ class Config(BaseModel):
             leaderboard_api_token=os.getenv("LEADERBOARD_API_TOKEN", ""),
             initial_capital=initial_capital,
             portfolios=portfolios,
+            default_stockcount=default_stockcount,
+            default_slack=default_slack,
             broker=broker_config,
             email=email_config,
             scheduler=scheduler_config,
@@ -308,7 +323,9 @@ class Config(BaseModel):
                         index_id = portfolio_data.get("index_id")
                         initial_capital = portfolio_data.get("initial_capital", default_initial_capital)
                         enabled = portfolio_data.get("enabled", True)
-                        
+                        stockcount = portfolio_data.get("stockcount", 5)
+                        slack = portfolio_data.get("slack", 0)
+
                         if portfolio_name and index_id:
                             if portfolio_name not in INDEX_NAME_TO_ID:
                                 raise ValueError(f"Invalid portfolio name: {portfolio_name}. Must be one of: {', '.join(INDEX_NAME_TO_ID.keys())}")
@@ -316,7 +333,9 @@ class Config(BaseModel):
                                 portfolio_name=portfolio_name,
                                 index_id=index_id,
                                 initial_capital=float(initial_capital),
-                                enabled=enabled
+                                enabled=enabled,
+                                stockcount=int(stockcount),
+                                slack=int(slack)
                             ))
             except json.JSONDecodeError as e:
                 raise ValueError(f"Invalid PORTFOLIO_CONFIG JSON: {e}")
@@ -333,9 +352,9 @@ class Config(BaseModel):
             for index_name in index_names:
                 if index_name not in INDEX_NAME_TO_ID:
                     raise ValueError(f"Invalid index name: {index_name}. Must be one of: {', '.join(INDEX_NAME_TO_ID.keys())}")
-                
+
                 index_id = INDEX_NAME_TO_ID[index_name]
-                
+
                 # Get initial capital for this portfolio
                 capital_env_var = f"INITIAL_CAPITAL_{index_name}"
                 capital_str = os.getenv(capital_env_var)
@@ -343,12 +362,24 @@ class Config(BaseModel):
                     initial_capital = float(capital_str)
                 else:
                     initial_capital = default_initial_capital
-                
+
+                # Get per-portfolio stockcount
+                stockcount_env_var = f"STOCKCOUNT_{index_name}"
+                stockcount_str = os.getenv(stockcount_env_var)
+                stockcount = int(stockcount_str) if stockcount_str and stockcount_str.strip() else 5
+
+                # Get per-portfolio slack
+                slack_env_var = f"SLACK_{index_name}"
+                slack_str = os.getenv(slack_env_var)
+                slack = int(slack_str) if slack_str and slack_str.strip() else 0
+
                 portfolios.append(PortfolioConfig(
                     portfolio_name=index_name,
                     index_id=index_id,
                     initial_capital=initial_capital,
-                    enabled=True
+                    enabled=True,
+                    stockcount=stockcount,
+                    slack=slack
                 ))
         
         return portfolios

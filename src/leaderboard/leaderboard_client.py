@@ -137,13 +137,67 @@ class LeaderboardClient:
             
             if len(symbols) < top_n:
                 logger.warning(f"Only received {len(symbols)} symbols, expected {top_n}")
-            
+
             logger.info(f"Retrieved {len(symbols)} symbols: {symbols}")
             return symbols[:top_n]
-            
+
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching leaderboard: {e}")
             raise
         except (KeyError, ValueError, TypeError) as e:
             logger.error(f"Error parsing leaderboard response: {e}")
             raise
+
+    def get_symbols_with_ranks(self, top_n: int = 10, mom_day: Optional[str] = None, index_id: str = "13") -> List[Dict[str, Any]]:
+        """
+        Fetch top N symbols with their ranks from leaderboard API.
+
+        Args:
+            top_n: Number of top symbols to return (default: 10)
+            mom_day: Optional date string in YYYY-MM-DD format. If not provided, uses previous Sunday.
+            index_id: Index ID for the leaderboard (default: "13" for SP400)
+
+        Returns:
+            List of dicts with 'symbol' and 'rank' keys
+
+        Raises:
+            requests.RequestException: If API request fails
+        """
+        if mom_day is None:
+            mom_day = self._get_previous_sunday()
+
+        request_body = {
+            "indexId": index_id,
+            "algoId": "1",
+            "momDay": mom_day
+        }
+
+        logger.info(f"Fetching top {top_n} symbols with ranks from leaderboard API with momDay={mom_day}")
+        response = self.session.post(self.api_url, json=request_body, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        # API returns list sorted by rank (wgdzscorerank field)
+        results = []
+        if isinstance(data, list):
+            for i, item in enumerate(data[:top_n]):
+                if isinstance(item, dict):
+                    symbol = item.get("symbol") or item.get("ticker") or item.get("stock") or item.get("code")
+                    if symbol:
+                        results.append({
+                            'symbol': str(symbol).upper(),
+                            'rank': item.get('wgdzscorerank', i + 1)
+                        })
+        elif isinstance(data, dict):
+            items = data.get("data") or data.get("results") or data.get("symbols") or data.get("stocks", [])
+            for i, item in enumerate(items[:top_n]):
+                if isinstance(item, dict):
+                    symbol = item.get("symbol") or item.get("ticker") or item.get("stock") or item.get("code")
+                    if symbol:
+                        results.append({
+                            'symbol': str(symbol).upper(),
+                            'rank': item.get('wgdzscorerank', i + 1)
+                        })
+
+        logger.info(f"Retrieved {len(results)} symbols with ranks")
+        return results

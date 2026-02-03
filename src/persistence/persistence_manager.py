@@ -18,7 +18,7 @@ except ImportError:
     FIREBASE_AVAILABLE = False
     FieldFilter = None
 
-from .models import TradeRecord, OwnershipRecord, ExternalSaleRecord
+from .models import TradeRecord, OwnershipRecord, ExternalSaleRecord, PortfolioCashRecord, ExecutionRunRecord
 from src.broker.models import Allocation
 from typing import List as TypingList
 
@@ -1058,5 +1058,373 @@ class PersistenceManager:
                         'price': price,
                         'timestamp': timestamp,
                     })
-        
+
+        return trades
+
+    # ============================================================
+    # Portfolio Cash Tracking Methods
+    # ============================================================
+
+    def initialize_portfolio_cash(self, portfolio_name: str, initial_capital: float) -> None:
+        """
+        Initialize cash balance for a portfolio if not exists.
+
+        Called once per portfolio setup. Does not overwrite existing balance.
+
+        Args:
+            portfolio_name: Portfolio name
+            initial_capital: Initial capital amount
+        """
+        cash_ref = self.db.collection('portfolio_cash').document(portfolio_name)
+        cash_doc = cash_ref.get()
+
+        if not cash_doc.exists:
+            now = datetime.now()
+            cash_record = PortfolioCashRecord(
+                portfolio_name=portfolio_name,
+                initial_capital=initial_capital,
+                cash_balance=initial_capital,
+                created_at=now,
+                last_updated=now,
+            )
+            cash_ref.set(cash_record.to_dict())
+            logger.info(f"[{portfolio_name}] Initialized cash balance: ${initial_capital:.2f}")
+        else:
+            logger.debug(f"[{portfolio_name}] Cash balance already exists, not overwriting")
+
+    def get_portfolio_cash(self, portfolio_name: str) -> float:
+        """
+        Get current cash balance for a portfolio.
+
+        Args:
+            portfolio_name: Portfolio name
+
+        Returns:
+            Current cash balance, or 0.0 if not initialized
+        """
+        cash_ref = self.db.collection('portfolio_cash').document(portfolio_name)
+        cash_doc = cash_ref.get()
+
+        if cash_doc.exists:
+            data = cash_doc.to_dict()
+            return data.get('cash_balance', 0.0)
+        return 0.0
+
+    def update_portfolio_cash(self, portfolio_name: str, amount: float, is_buy: bool) -> float:
+        """
+        Update cash balance: subtract on buy, add on sell.
+
+        Args:
+            portfolio_name: Portfolio name
+            amount: Amount to add/subtract
+            is_buy: True for buy (subtract), False for sell (add)
+
+        Returns:
+            New cash balance
+        """
+        cash_ref = self.db.collection('portfolio_cash').document(portfolio_name)
+        cash_doc = cash_ref.get()
+
+        if not cash_doc.exists:
+            logger.warning(f"[{portfolio_name}] Cash record not found, cannot update")
+            return 0.0
+
+        data = cash_doc.to_dict()
+        current_balance = data.get('cash_balance', 0.0)
+
+        if is_buy:
+            new_balance = current_balance - amount
+        else:
+            new_balance = current_balance + amount
+
+        cash_ref.update({
+            'cash_balance': new_balance,
+            'last_updated': datetime.now(),
+        })
+
+        action = "debited" if is_buy else "credited"
+        logger.info(f"[{portfolio_name}] Cash {action}: ${amount:.2f}, new balance: ${new_balance:.2f}")
+        return new_balance
+
+    # ============================================================
+    # Execution Run Tracking Methods
+    # ============================================================
+
+    def _get_today_date_et(self) -> str:
+        """Get today's date in ET timezone as YYYY-MM-DD string."""
+        import pytz
+        eastern = pytz.timezone('America/New_York')
+        now_et = datetime.now(eastern)
+        return now_et.strftime('%Y-%m-%d')
+
+    def start_execution_run(self, portfolio_name: str) -> str:
+        """
+        Start a new execution run for a portfolio.
+
+        Args:
+            portfolio_name: Portfolio name
+
+        Returns:
+            Execution run ID (format: {portfolio_name}_{date})
+        """
+        date_str = self._get_today_date_et()
+        run_id = f"{portfolio_name}_{date_str}"
+
+        run_ref = self.db.collection('execution_runs').document(run_id)
+        run_doc = run_ref.get()
+
+        now = datetime.now()
+
+        if run_doc.exists:
+            # Run already exists - update to started
+            run_ref.update({
+                'status': 'started',
+                'started_at': now,
+                'completed_at': None,
+                'error_message': None,
+            })
+            logger.info(f"[{portfolio_name}] Restarted execution run: {run_id}")
+        else:
+            # Create new run
+            run_record = ExecutionRunRecord(
+                portfolio_name=portfolio_name,
+                date=date_str,
+                status='started',
+                started_at=now,
+            )
+            run_ref.set(run_record.to_dict())
+            logger.info(f"[{portfolio_name}] Started new execution run: {run_id}")
+
+        return run_id
+
+    def get_execution_run(self, portfolio_name: str, date_str: Optional[str] = None) -> Optional[dict]:
+        """
+        Get execution run for a portfolio on a specific date.
+
+        Args:
+            portfolio_name: Portfolio name
+            date_str: Date string (YYYY-MM-DD). Defaults to today in ET.
+
+        Returns:
+            Execution run data dict, or None if not found
+        """
+        if date_str is None:
+            date_str = self._get_today_date_et()
+
+        run_id = f"{portfolio_name}_{date_str}"
+        run_ref = self.db.collection('execution_runs').document(run_id)
+        run_doc = run_ref.get()
+
+        if run_doc.exists:
+            data = run_doc.to_dict()
+            data['run_id'] = run_id
+            return data
+        return None
+
+    def was_successful_today(self, portfolio_name: str) -> bool:
+        """
+        Check if portfolio already completed successfully today.
+
+        A run is successful when:
+        1. status == "completed"
+        2. trades_submitted == 0 (all trades reached terminal status)
+
+        Args:
+            portfolio_name: Portfolio name
+
+        Returns:
+            True if successful today, False otherwise
+        """
+        run = self.get_execution_run(portfolio_name)
+        if not run:
+            return False
+
+        status = run.get('status', '')
+        trades_submitted = run.get('trades_submitted', 0)
+
+        # Successful = completed AND no trades stuck in submitted state
+        return status == 'completed' and trades_submitted == 0
+
+    def update_execution_run(self, execution_run_id: str, **kwargs) -> None:
+        """
+        Update execution run fields.
+
+        Args:
+            execution_run_id: Run ID (format: {portfolio_name}_{date})
+            **kwargs: Fields to update (status, trades_planned, trades_submitted,
+                      trades_filled, trades_failed, completed_at, error_message)
+        """
+        run_ref = self.db.collection('execution_runs').document(execution_run_id)
+        run_doc = run_ref.get()
+
+        if not run_doc.exists:
+            logger.warning(f"Execution run not found: {execution_run_id}")
+            return
+
+        # Filter to allowed fields
+        allowed_fields = {
+            'status', 'trades_planned', 'trades_submitted', 'trades_filled',
+            'trades_failed', 'completed_at', 'error_message'
+        }
+        update_data = {k: v for k, v in kwargs.items() if k in allowed_fields}
+
+        if update_data:
+            run_ref.update(update_data)
+            logger.debug(f"Updated execution run {execution_run_id}: {update_data}")
+
+    # ============================================================
+    # Trade Status Tracking Methods
+    # ============================================================
+
+    def record_planned_trade(self, trade: TradeRecord, execution_run_id: str) -> str:
+        """
+        Record a planned trade with execution run ID.
+
+        Args:
+            trade: Trade record (will have status set to 'planned')
+            execution_run_id: Associated execution run ID
+
+        Returns:
+            Firestore document ID for the trade
+        """
+        trade.status = 'planned'
+        trade.execution_run_id = execution_run_id
+
+        collection = self.db.collection('trades')
+        doc_ref = collection.document()
+        doc_ref.set(trade.to_dict())
+
+        logger.debug(f"Recorded planned trade: {trade.symbol} {trade.action}")
+        return doc_ref.id
+
+    def update_trade_submitted(self, trade_doc_id: str, broker_order_id: Optional[str] = None) -> None:
+        """
+        Update trade status to submitted.
+
+        Args:
+            trade_doc_id: Firestore document ID
+            broker_order_id: Broker's order ID (optional)
+        """
+        trade_ref = self.db.collection('trades').document(trade_doc_id)
+        update_data = {
+            'status': 'submitted',
+            'submitted_at': datetime.now(),
+        }
+        if broker_order_id:
+            update_data['broker_order_id'] = broker_order_id
+
+        trade_ref.update(update_data)
+        logger.debug(f"Trade {trade_doc_id} marked as submitted (order_id: {broker_order_id})")
+
+    def update_trade_filled(
+        self,
+        trade_doc_id: str,
+        quantity: float,
+        price: float,
+        total: float,
+    ) -> None:
+        """
+        Update trade status to filled with actual fill data.
+
+        Args:
+            trade_doc_id: Firestore document ID
+            quantity: Filled quantity
+            price: Fill price
+            total: Total value
+        """
+        trade_ref = self.db.collection('trades').document(trade_doc_id)
+        trade_ref.update({
+            'status': 'filled',
+            'filled_at': datetime.now(),
+            'quantity': quantity,
+            'price': price,
+            'total': total,
+        })
+        logger.debug(f"Trade {trade_doc_id} marked as filled: {quantity} @ ${price:.2f}")
+
+    def update_trade_failed(self, trade_doc_id: str, error_message: str) -> None:
+        """
+        Update trade status to failed.
+
+        Args:
+            trade_doc_id: Firestore document ID
+            error_message: Error description
+        """
+        trade_ref = self.db.collection('trades').document(trade_doc_id)
+        trade_ref.update({
+            'status': 'failed',
+            'failed_at': datetime.now(),
+            'error_message': error_message,
+        })
+        logger.debug(f"Trade {trade_doc_id} marked as failed: {error_message}")
+
+    def get_submitted_trades(self, portfolio_name: str) -> List[dict]:
+        """
+        Get all trades with status 'submitted' for a portfolio.
+
+        Args:
+            portfolio_name: Portfolio name
+
+        Returns:
+            List of trade dicts with doc_id included
+        """
+        trades_ref = self.db.collection('trades')
+
+        if FieldFilter:
+            query = trades_ref.where(
+                filter=FieldFilter('portfolio_name', '==', portfolio_name)
+            ).where(
+                filter=FieldFilter('status', '==', 'submitted')
+            )
+        else:
+            query = trades_ref.where(
+                'portfolio_name', '==', portfolio_name
+            ).where(
+                'status', '==', 'submitted'
+            )
+
+        trades = []
+        for doc in query.stream():
+            data = doc.to_dict()
+            data['doc_id'] = doc.id
+            trades.append(data)
+
+        return trades
+
+    def get_pending_trades(self, portfolio_name: str) -> List[dict]:
+        """
+        Get all trades with status 'planned' or 'submitted' for a portfolio.
+
+        Args:
+            portfolio_name: Portfolio name
+
+        Returns:
+            List of trade dicts with doc_id included
+        """
+        trades_ref = self.db.collection('trades')
+
+        # Get planned trades
+        if FieldFilter:
+            planned_query = trades_ref.where(
+                filter=FieldFilter('portfolio_name', '==', portfolio_name)
+            ).where(
+                filter=FieldFilter('status', '==', 'planned')
+            )
+        else:
+            planned_query = trades_ref.where(
+                'portfolio_name', '==', portfolio_name
+            ).where(
+                'status', '==', 'planned'
+            )
+
+        trades = []
+        for doc in planned_query.stream():
+            data = doc.to_dict()
+            data['doc_id'] = doc.id
+            trades.append(data)
+
+        # Get submitted trades
+        submitted_trades = self.get_submitted_trades(portfolio_name)
+        trades.extend(submitted_trades)
+
         return trades

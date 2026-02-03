@@ -192,3 +192,47 @@ class AlpacaBroker(Broker):
         except Exception as e:
             logger.warning(f"Error getting trade history from Alpaca: {e}")
             return []
+
+    def get_order_status(self, order_id: str) -> dict:
+        """Get order status from Alpaca."""
+        try:
+            order = self.client.get_order_by_id(order_id)
+
+            # Map Alpaca status to our status
+            status_map = {
+                'filled': 'filled',
+                'partially_filled': 'partial',
+                'new': 'pending',
+                'accepted': 'pending',
+                'pending_new': 'pending',
+                'canceled': 'cancelled',
+                'cancelled': 'cancelled',
+                'rejected': 'rejected',
+                'expired': 'expired',
+                'done_for_day': 'pending',
+                'replaced': 'cancelled',
+                'pending_cancel': 'pending',
+                'pending_replace': 'pending',
+                'stopped': 'pending',
+                'suspended': 'pending',
+                'calculated': 'pending',
+            }
+
+            # Get status string from order (handle enum or string)
+            order_status = order.status
+            if hasattr(order_status, 'value'):
+                order_status = order_status.value
+            order_status = str(order_status).lower()
+
+            return {
+                'status': status_map.get(order_status, 'pending'),
+                'filled_qty': float(order.filled_qty or 0),
+                'filled_avg_price': float(order.filled_avg_price or 0),
+            }
+        except Exception as e:
+            logger.error(f"Error getting order status {order_id}: {e}")
+            return {
+                'status': 'pending',
+                'filled_qty': 0.0,
+                'filled_avg_price': 0.0,
+            }

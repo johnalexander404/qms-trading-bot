@@ -14,7 +14,7 @@ from .broker import create_broker
 from .broker.models import TradeSummary, PortfolioPerformance, MultiPortfolioSummary
 from .leaderboard import LeaderboardClient
 from .notifications import create_email_notifier
-from .trading import Rebalancer
+from .trading import Rebalancer, ExecutionTracker, TradeStatusChecker, CashManager
 from .scheduler import create_scheduler
 from .api import create_app
 
@@ -39,6 +39,9 @@ class TradingBot:
         self.scheduler = None
         self.app = None
         self.persistence_manager = None
+        self.execution_tracker = None
+        self.trade_status_checker = None
+        self.cash_manager = None
         
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -94,6 +97,11 @@ class TradingBot:
                         credentials_json=self.config.persistence.credentials_json,
                     )
                     logger.info("Initialized persistence manager (Firebase Firestore)")
+
+                    # Initialize execution tracker, trade status checker, and cash manager
+                    self.execution_tracker = ExecutionTracker(self.persistence_manager)
+                    self.cash_manager = CashManager(self.persistence_manager)
+                    logger.info("Initialized execution tracker and cash manager")
             except Exception as e:
                 logger.warning(f"Failed to initialize persistence manager: {e}. Continuing without persistence.")
                 self.persistence_manager = None
@@ -113,25 +121,53 @@ class TradingBot:
                 index_id=INDEX_NAME_TO_ID["SP400"],
                 initial_capital=self.config.initial_capital,
                 enabled=True,
+                stockcount=self.config.default_stockcount,
+                slack=self.config.default_slack,
             )
             self.config.portfolios = [default_portfolio]
         
         for portfolio_config in self.config.portfolios:
             if not portfolio_config.enabled:
                 continue
-            
+
+            # Use portfolio config values, falling back to defaults if using default values and no persistence
+            stockcount = portfolio_config.stockcount
+            if stockcount == 5 and not self.persistence_manager:
+                stockcount = self.config.default_stockcount
+
+            slack = portfolio_config.slack
+            if slack == 0 and not self.persistence_manager:
+                slack = self.config.default_slack
+
             rebalancer = Rebalancer(
                 broker=self.broker,
                 leaderboard_client=self.leaderboard_client,
                 initial_capital=portfolio_config.initial_capital,
                 portfolio_name=portfolio_config.portfolio_name,
                 index_id=portfolio_config.index_id,
+                stockcount=stockcount,
+                slack=slack,
                 email_notifier=self.email_notifier,
                 persistence_manager=self.persistence_manager,
             )
             self.rebalancers[portfolio_config.portfolio_name] = rebalancer
-            logger.info(f"Initialized rebalancer for {portfolio_config.portfolio_name} portfolio (index {portfolio_config.index_id})")
-        
+            logger.info(f"Initialized rebalancer for {portfolio_config.portfolio_name} portfolio (index {portfolio_config.index_id}, stockcount={stockcount}, slack={slack})")
+
+            # Initialize cash balance for this portfolio
+            if self.cash_manager:
+                self.cash_manager.initialize(
+                    portfolio_config.portfolio_name,
+                    portfolio_config.initial_capital,
+                )
+
+        # Initialize trade status checker (requires broker)
+        if self.persistence_manager and self.broker:
+            self.trade_status_checker = TradeStatusChecker(
+                self.persistence_manager,
+                self.broker,
+            )
+            logger.info("Initialized trade status checker")
+
         # Initialize scheduler based on mode
         if self.config.scheduler.mode == "internal":
             self.scheduler = create_scheduler(job_function=self._execute_rebalancing)
@@ -146,34 +182,34 @@ class TradingBot:
     
     def _is_market_open_time(self) -> bool:
         """
-        Check if current time is 9:30 AM Eastern Time (market open).
+        Check if current time is within the trading window (9:30-10:00 AM ET).
         This ensures timezone-aware scheduling works correctly with DST.
-        Allows a 5-minute window (9:28-9:33 AM) to account for scheduling delays.
-        
+        Expanded to 30-minute window to support cron resilience (every 5 min).
+
         Manual triggers skip day/time check and always return True.
-        Scheduled runs must be on Monday at 9:30 AM ET.
-        
+        Scheduled runs must be on Monday within the 9:30-10:00 AM ET window.
+
         Returns:
-            True if manual trigger, or if it's around 9:30 AM ET on Monday, False otherwise
+            True if manual trigger, or if within 9:30-10:00 AM ET on Monday
         """
         # Manual triggers skip day/time check
         if self._is_manual_trigger():
             logger.info("Manual trigger detected - skipping day/time check")
             return True
-        
+
         # Check FORCE_RUN environment variable (for backward compatibility)
         force_run = os.getenv("FORCE_RUN", "false").lower() == "true"
         if force_run:
             logger.info("FORCE_RUN=true - allowing execution regardless of time/day")
             return True
-        
+
         # Get current time in Eastern Time
         eastern = pytz.timezone('America/New_York')
         now_et = datetime.now(eastern)
-        
+
         # Check if it's Monday
         is_monday = now_et.weekday() == 0  # Monday is 0
-        
+
         if not is_monday:
             logger.info(
                 f"Skipping execution - not Monday. "
@@ -181,24 +217,23 @@ class TradingBot:
                 f"Day: {now_et.strftime('%A')}"
             )
             return False
-        
-        # Check if it's within 5 minutes of 9:30 AM (9:28-9:33 AM)
-        # This accounts for potential GitHub Actions scheduling delays
+
+        # Check if within 9:30 AM - 10:00 AM window (30 minutes)
         current_minute = now_et.hour * 60 + now_et.minute
-        target_minute = 9 * 60 + 30  # 9:30 AM
-        time_diff = abs(current_minute - target_minute)
-        
-        if time_diff <= 5:  # Within 5 minutes of 9:30 AM
+        window_start = 9 * 60 + 30   # 9:30 AM
+        window_end = 10 * 60         # 10:00 AM
+
+        if window_start <= current_minute <= window_end:
             logger.info(
-                f"Market open time confirmed: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')} "
-                f"(within {time_diff} minutes of 9:30 AM ET)"
+                f"Within trading window: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+                f"(9:30-10:00 AM ET)"
             )
             return True
-        
+
         logger.info(
-            f"Skipping execution - not market open time. "
+            f"Skipping execution - not within trading window. "
             f"Current ET time: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')}, "
-            f"Expected: Monday 9:30 AM ET (±5 min)"
+            f"Expected: Monday 9:30-10:00 AM ET"
         )
         return False
     
@@ -246,17 +281,51 @@ class TradingBot:
         is_manual = self._is_manual_trigger()
         trigger_type = "Manual trigger" if is_manual else "Scheduled run (cron)"
         logger.info(f"Execution triggered by: {trigger_type}")
-        
-        # Timezone-aware check: only execute at 9:30 AM Eastern Time
+
+        # Timezone-aware check: only execute within trading window
         # This handles DST automatically since we check the actual ET time
         # FORCE_RUN=true allows execution at any time
         if not self._is_market_open_time():
-            logger.info("Not executing rebalancing - not at market open time (9:30 AM ET)")
+            logger.info("Not executing rebalancing - not within trading window (9:30-10:00 AM ET)")
             return None
-        
+
+        # STEP 1: Check status of submitted trades from previous runs
+        if self.trade_status_checker:
+            for portfolio_name in self.rebalancers.keys():
+                check_result = self.trade_status_checker.check_submitted_trades(portfolio_name)
+                if check_result.checked > 0:
+                    logger.info(
+                        f"[{portfolio_name}] Checked {check_result.checked} submitted trades: "
+                        f"{check_result.filled} filled, {check_result.failed} failed, "
+                        f"{check_result.still_pending} still pending"
+                    )
+
+                    # Update execution run counts if we have an execution tracker
+                    if self.execution_tracker:
+                        run = self.execution_tracker.get_today_run(portfolio_name)
+                        if run:
+                            self.execution_tracker.update_trade_counts(
+                                run['run_id'],
+                                trades_filled=run.get('trades_filled', 0) + check_result.filled,
+                                trades_failed=run.get('trades_failed', 0) + check_result.failed,
+                                trades_submitted=check_result.still_pending,
+                            )
+
+        # STEP 2: Check if all portfolios already completed successfully today
+        if self.execution_tracker:
+            all_successful = all(
+                self.execution_tracker.was_successful_today(name)
+                for name in self.rebalancers.keys()
+            )
+            if all_successful:
+                logger.info("All portfolios already successfully completed today. Exiting.")
+                # Send completion email if not already sent
+                self._send_completion_email()
+                return None
+
         # Check if we should execute trades or just simulate (dry-run)
         dry_run = not self._should_execute_trades()
-        
+
         if dry_run:
             logger.info("=" * 60)
             logger.info("DRY-RUN MODE: Showing what would be executed (no trades will be placed)")
@@ -268,7 +337,13 @@ class TradingBot:
                 logger.info("Executing rebalancing (Manual trigger with FORCE_RUN=true)...")
             else:
                 logger.info("Executing rebalancing (Scheduled run - always executes)...")
-        
+
+        # STEP 3: Start execution runs for each portfolio
+        execution_run_ids = {}
+        if self.execution_tracker and not dry_run:
+            for portfolio_name in self.rebalancers.keys():
+                execution_run_ids[portfolio_name] = self.execution_tracker.start_run(portfolio_name)
+
         try:
             # Calculate PRE-TRADE performance (before executing any trades)
             # This shows current holdings vs initial capital
@@ -315,7 +390,7 @@ class TradingBot:
                     # Get leaderboard symbols for this portfolio
                     current_week_mom_day = self.leaderboard_client._get_previous_sunday()
                     leaderboard_symbols = self.leaderboard_client.get_top_symbols(
-                        top_n=5, 
+                        top_n=rebalancer.stockcount,
                         mom_day=current_week_mom_day,
                         index_id=rebalancer.index_id
                     )
@@ -328,16 +403,41 @@ class TradingBot:
             
             # Now execute rebalancing for each portfolio
             portfolio_summaries: Dict[str, TradeSummary] = {}
-            
+
             for portfolio_name, rebalancer in self.rebalancers.items():
+                execution_run_id = execution_run_ids.get(portfolio_name)
                 try:
                     logger.info(f"[{portfolio_name}] Starting rebalancing...")
-                    summary = rebalancer.rebalance(dry_run=dry_run)
+                    summary = rebalancer.rebalance(
+                        dry_run=dry_run,
+                        execution_run_id=execution_run_id,
+                    )
                     portfolio_summaries[portfolio_name] = summary
-                    
+
                     logger.info(f"[{portfolio_name}] Rebalancing {'simulation' if dry_run else 'execution'} completed. Portfolio value: ${summary.portfolio_value:.2f}")
+
+                    # Update execution run on completion
+                    if self.execution_tracker and execution_run_id and not dry_run:
+                        # Count trades by status
+                        submitted_count = len([b for b in summary.buys if b.get('status') == 'submitted']) + \
+                                         len([s for s in summary.sells if s.get('status') == 'submitted'])
+                        failed_count = len(summary.failed_trades) if summary.failed_trades else 0
+                        planned_count = len(summary.buys) + len(summary.sells)
+
+                        self.execution_tracker.complete_run(
+                            execution_run_id,
+                            {
+                                'trades_planned': planned_count,
+                                'trades_submitted': submitted_count,
+                                'trades_filled': 0,  # Will be updated when orders fill
+                                'trades_failed': failed_count,
+                            }
+                        )
                 except Exception as portfolio_error:
                     logger.error(f"[{portfolio_name}] Error during rebalancing: {portfolio_error}")
+                    # Mark execution run as failed
+                    if self.execution_tracker and execution_run_id and not dry_run:
+                        self.execution_tracker.fail_run(execution_run_id, str(portfolio_error))
                     # Continue with other portfolios
             
             # Fetch ownership records for each portfolio (if persistence enabled) - needed for net_invested calculation
@@ -542,7 +642,34 @@ class TradingBot:
             overall_return=overall_return,
             overall_return_pct=overall_return_pct,
         )
-    
+
+    def _send_completion_email(self):
+        """Send email notification after successful daily completion."""
+        if not self.email_notifier or not self.config.email.recipient:
+            return
+
+        if not self.persistence_manager:
+            return
+
+        # Gather results from today's execution runs
+        portfolio_results = {}
+        for portfolio_name in self.rebalancers.keys():
+            run = self.persistence_manager.get_execution_run(portfolio_name)
+            if run:
+                portfolio_results[portfolio_name] = run
+
+        if not portfolio_results:
+            return
+
+        try:
+            self.email_notifier.send_trades_finalized_email(
+                recipient=self.config.email.recipient,
+                portfolio_results=portfolio_results,
+            )
+            logger.info("Daily completion email sent")
+        except Exception as e:
+            logger.error(f"Error sending completion email: {e}")
+
     def run(self):
         """Run the trading bot."""
         self.initialize()

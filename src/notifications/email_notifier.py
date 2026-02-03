@@ -882,5 +882,258 @@ Performance: ${performance.total_return:,.2f} ({performance.total_return_pct:.2f
             
             total_portfolio_value = sum(alloc.market_value for alloc in aggregated_allocations.values())
             text += f"\nTotal Portfolio Value: ${total_portfolio_value:,.2f}\n"
-        
+
         return text
+
+    def send_trades_submitted_email(
+        self,
+        recipient: str,
+        portfolio_name: str,
+        trades: List[Dict[str, Any]],
+    ) -> bool:
+        """
+        Send email when trades are submitted to broker.
+
+        Args:
+            recipient: Email recipient address
+            portfolio_name: Portfolio name
+            trades: List of trades with {symbol, action, amount, broker_order_id}
+
+        Returns:
+            True if email sent successfully, False otherwise
+        """
+        date_str = datetime.now().strftime('%Y-%m-%d')
+        subject = f"[QMS Bot] Trades Submitted - {portfolio_name} - {date_str}"
+
+        # Build HTML content
+        html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; }}
+                h2 {{ color: #333; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #4CAF50; color: white; }}
+                .info {{ background-color: #e7f3fe; padding: 15px; margin: 20px 0; border-left: 4px solid #2196F3; }}
+            </style>
+        </head>
+        <body>
+            <h2>Trades Submitted - {portfolio_name}</h2>
+            <p><strong>Date:</strong> {date_str}</p>
+
+            <div class="info">
+                <p>The following trades have been submitted to the broker. They will be checked for fills on subsequent runs.</p>
+            </div>
+
+            <h3>Submitted Trades</h3>
+            <table>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Action</th>
+                    <th>Amount</th>
+                    <th>Order ID</th>
+                </tr>
+        """
+
+        for trade in trades:
+            html += f"""
+                <tr>
+                    <td>{trade.get('symbol', 'N/A')}</td>
+                    <td>{trade.get('action', 'N/A')}</td>
+                    <td>${trade.get('amount', 0):.2f}</td>
+                    <td>{trade.get('broker_order_id', 'N/A')}</td>
+                </tr>
+            """
+
+        html += """
+            </table>
+            <p><em>Waiting for fills...</em></p>
+        </body>
+        </html>
+        """
+
+        # Build text content
+        text = f"""Trades Submitted - {portfolio_name}
+Date: {date_str}
+
+The following trades have been submitted to the broker:
+
+"""
+        for trade in trades:
+            text += f"  - {trade.get('action', 'N/A')} {trade.get('symbol', 'N/A')}: ${trade.get('amount', 0):.2f} (Order ID: {trade.get('broker_order_id', 'N/A')})\n"
+
+        text += "\nWaiting for fills...\n"
+
+        return self._send_email(recipient, subject, text, html)
+
+    def send_trades_finalized_email(
+        self,
+        recipient: str,
+        portfolio_results: Dict[str, Dict[str, Any]],
+        filled_trades: Optional[List[Dict[str, Any]]] = None,
+        failed_trades: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
+        """
+        Send email when all trades have reached terminal status.
+
+        Args:
+            recipient: Email recipient address
+            portfolio_results: Dict of portfolio_name -> execution run data
+            filled_trades: Optional list of filled trade details
+            failed_trades: Optional list of failed trade details
+
+        Returns:
+            True if email sent successfully, False otherwise
+        """
+        date_str = datetime.now().strftime('%Y-%m-%d')
+
+        # Determine if single or multi-portfolio
+        portfolio_names = list(portfolio_results.keys())
+        if len(portfolio_names) == 1:
+            subject = f"[QMS Bot] Trades Complete - {portfolio_names[0]} - {date_str}"
+        else:
+            subject = f"[QMS Bot] Trades Complete - {date_str}"
+
+        # Calculate totals
+        total_planned = sum(r.get('trades_planned', 0) for r in portfolio_results.values())
+        total_filled = sum(r.get('trades_filled', 0) for r in portfolio_results.values())
+        total_failed = sum(r.get('trades_failed', 0) for r in portfolio_results.values())
+
+        # Build HTML content
+        html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; }}
+                h2 {{ color: #333; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #4CAF50; color: white; }}
+                .summary {{ background-color: #f2f2f2; padding: 15px; margin: 20px 0; }}
+                .positive {{ color: #4CAF50; font-weight: bold; }}
+                .negative {{ color: #f44336; font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+            <h2>Trading Complete - {date_str}</h2>
+
+            <div class="summary">
+                <h3>Summary</h3>
+                <p><strong>Total Trades Planned:</strong> {total_planned}</p>
+                <p><strong>Total Trades Filled:</strong> <span class="positive">{total_filled}</span></p>
+                <p><strong>Total Trades Failed:</strong> <span class="{'negative' if total_failed > 0 else ''}">{total_failed}</span></p>
+            </div>
+
+            <h3>Portfolio Details</h3>
+            <table>
+                <tr>
+                    <th>Portfolio</th>
+                    <th>Status</th>
+                    <th>Planned</th>
+                    <th>Filled</th>
+                    <th>Failed</th>
+                </tr>
+        """
+
+        for portfolio_name, run in portfolio_results.items():
+            status = run.get('status', 'unknown')
+            status_class = 'positive' if status == 'completed' else 'negative'
+            failed = run.get('trades_failed', 0)
+            failed_class = 'negative' if failed > 0 else ''
+
+            html += f"""
+                <tr>
+                    <td><strong>{portfolio_name}</strong></td>
+                    <td class="{status_class}">{status}</td>
+                    <td>{run.get('trades_planned', 0)}</td>
+                    <td class="positive">{run.get('trades_filled', 0)}</td>
+                    <td class="{failed_class}">{failed}</td>
+                </tr>
+            """
+
+        html += """
+            </table>
+        """
+
+        # Add filled trades details if provided
+        if filled_trades:
+            html += """
+            <h3>Filled Trades</h3>
+            <table>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Action</th>
+                    <th>Quantity</th>
+                    <th>Price</th>
+                    <th>Total</th>
+                </tr>
+            """
+            for trade in filled_trades:
+                html += f"""
+                <tr>
+                    <td>{trade.get('symbol', 'N/A')}</td>
+                    <td>{trade.get('action', 'N/A')}</td>
+                    <td>{trade.get('quantity', 0):.2f}</td>
+                    <td>${trade.get('price', 0):.2f}</td>
+                    <td>${trade.get('total', 0):.2f}</td>
+                </tr>
+                """
+            html += "</table>"
+
+        # Add failed trades details if provided
+        if failed_trades:
+            html += """
+            <h3>Failed Trades</h3>
+            <table style="border: 2px solid #f44336;">
+                <tr>
+                    <th>Symbol</th>
+                    <th>Action</th>
+                    <th>Error</th>
+                </tr>
+            """
+            for trade in failed_trades:
+                html += f"""
+                <tr>
+                    <td>{trade.get('symbol', 'N/A')}</td>
+                    <td>{trade.get('action', 'N/A')}</td>
+                    <td style="color: #f44336;">{trade.get('error', 'Unknown error')}</td>
+                </tr>
+                """
+            html += "</table>"
+
+        html += """
+        </body>
+        </html>
+        """
+
+        # Build text content
+        text = f"""Trading Complete - {date_str}
+
+Summary:
+  Total Trades Planned: {total_planned}
+  Total Trades Filled: {total_filled}
+  Total Trades Failed: {total_failed}
+
+Portfolio Details:
+"""
+        for portfolio_name, run in portfolio_results.items():
+            text += f"""
+{portfolio_name}:
+  Status: {run.get('status', 'unknown')}
+  Planned: {run.get('trades_planned', 0)}
+  Filled: {run.get('trades_filled', 0)}
+  Failed: {run.get('trades_failed', 0)}
+"""
+
+        if filled_trades:
+            text += "\nFilled Trades:\n"
+            for trade in filled_trades:
+                text += f"  - {trade.get('action', 'N/A')} {trade.get('symbol', 'N/A')}: {trade.get('quantity', 0):.2f} @ ${trade.get('price', 0):.2f} = ${trade.get('total', 0):.2f}\n"
+
+        if failed_trades:
+            text += "\nFailed Trades:\n"
+            for trade in failed_trades:
+                text += f"  - {trade.get('action', 'N/A')} {trade.get('symbol', 'N/A')}: {trade.get('error', 'Unknown error')}\n"
+
+        return self._send_email(recipient, subject, text, html)

@@ -21,18 +21,22 @@ class Rebalancer:
         initial_capital: float,
         portfolio_name: str,
         index_id: str,
+        stockcount: int = 5,
+        slack: int = 0,
         email_notifier: Optional[EmailNotifier] = None,
         persistence_manager: Optional[object] = None,  # PersistenceManager type
     ):
         """
         Initialize rebalancer.
-        
+
         Args:
             broker: Broker instance
             leaderboard_client: Leaderboard API client
             initial_capital: Initial capital for portfolio allocation
             portfolio_name: Portfolio name (e.g., "SP400", "SP500")
             index_id: Internal API index ID (e.g., "13", "9")
+            stockcount: Number of stocks to hold in portfolio (default: 5)
+            slack: Position buffer - sell when rank > stockcount + slack (default: 0)
             email_notifier: Optional email notifier
             persistence_manager: Optional persistence manager for trade tracking
         """
@@ -41,32 +45,51 @@ class Rebalancer:
         self.initial_capital = initial_capital
         self.portfolio_name = portfolio_name
         self.index_id = index_id
+        self.stockcount = stockcount
+        self.slack = slack
         self.email_notifier = email_notifier
         self.persistence_manager = persistence_manager
+        self._current_execution_run_id = None  # Set during rebalance()
     
-    def rebalance(self, dry_run: bool = False) -> TradeSummary:
+    def rebalance(self, dry_run: bool = False, execution_run_id: Optional[str] = None) -> TradeSummary:
         """
         Execute portfolio rebalancing based on week-over-week leaderboard comparison.
-        
+
         Args:
             dry_run: If True, print actions but don't execute trades. If False, execute trades normally.
-        
+            execution_run_id: Optional execution run ID for tracking trades.
+
         Returns:
             TradeSummary with details of executed trades (or simulated trades in dry-run mode)
         """
-        logger.info(f"[{self.portfolio_name}] Starting portfolio rebalancing")
-        
-        # Fetch current week (week-1) and previous week (week-2) leaderboards
+        self._current_execution_run_id = execution_run_id
+        logger.info(f"[{self.portfolio_name}] Starting portfolio rebalancing (stockcount={self.stockcount}, slack={self.slack})")
+
+        # Fetch current week leaderboard with ranks
+        # Need to fetch stockcount + slack + buffer to see if current holdings dropped out
+        fetch_count = self.stockcount + self.slack + 5  # Extra buffer for safety
+
         try:
             # Current week (week-1): previous Sunday
             current_week_mom_day = self.leaderboard_client._get_previous_sunday()
-            current_week_symbols = self.leaderboard_client.get_top_symbols(top_n=5, mom_day=current_week_mom_day, index_id=self.index_id)
-            logger.info(f"[{self.portfolio_name}] Current week (week-1) leaderboard top 5: {current_week_symbols}")
-            
+            current_week_data = self.leaderboard_client.get_symbols_with_ranks(
+                top_n=fetch_count, mom_day=current_week_mom_day, index_id=self.index_id
+            )
+
+            # Build rank lookup: symbol -> rank
+            current_ranks = {item['symbol']: item['rank'] for item in current_week_data}
+
+            # Top N symbols to buy (within stockcount)
+            current_week_symbols = [item['symbol'] for item in current_week_data[:self.stockcount]]
+            logger.info(f"[{self.portfolio_name}] Current week top {self.stockcount}: {current_week_symbols}")
+
             # Previous week (week-2): Sunday from two weeks ago
             previous_week_mom_day = self.leaderboard_client._get_previous_week_sunday()
-            previous_week_symbols = self.leaderboard_client.get_top_symbols(top_n=5, mom_day=previous_week_mom_day, index_id=self.index_id)
-            logger.info(f"[{self.portfolio_name}] Previous week (week-2) leaderboard top 5: {previous_week_symbols}")
+            previous_week_data = self.leaderboard_client.get_symbols_with_ranks(
+                top_n=fetch_count, mom_day=previous_week_mom_day, index_id=self.index_id
+            )
+            previous_week_symbols = [item['symbol'] for item in previous_week_data[:self.stockcount]]
+            logger.info(f"[{self.portfolio_name}] Previous week top {self.stockcount}: {previous_week_symbols}")
         except Exception as e:
             logger.error(f"Error fetching leaderboard: {e}")
             raise
@@ -140,14 +163,15 @@ class Rebalancer:
             logger.info(f"[{self.portfolio_name}] No stocks from previous week's LB exist and available capital >= $10k. Entering trades for top 5 stocks using ${capital_to_use:.2f} (initial_capital + external sale proceeds).")
             return self._initial_allocation(current_week_symbols_upper, capital_to_use, dry_run=dry_run)
         
-        # Case 2: Compare top 5 stocks between LB-1 and LB
-        # Sell stocks that were in last week's top 5 but aren't in this week's top 5
-        # Buy stocks that entered this week's top 5
+        # Case 2: Compare leaderboards using rank-based logic with slack
+        # Sell stocks that dropped below stockcount + slack threshold
+        # Buy stocks that entered top stockcount
         logger.info(f"[{self.portfolio_name}] Comparing leaderboards and executing rebalancing...")
         return self._execute_week_over_week_rebalancing(
             current_allocations,
             current_week_symbols_upper,
             previous_week_symbols_upper,
+            current_ranks=current_ranks,
             external_sale_proceeds=external_sale_proceeds,
             external_sales_by_symbol=external_sales_by_symbol,
             dry_run=dry_run
@@ -157,19 +181,22 @@ class Rebalancer:
         """Check if current allocations match target symbols."""
         current_symbols = {alloc.symbol.upper() for alloc in allocations}
         target_set = {s.upper() for s in target_symbols}
-        
-        # Check if we have exactly the top 5 symbols
-        return current_symbols == target_set and len(current_symbols) == 5
+
+        # Check if we have exactly the top stockcount symbols
+        return current_symbols == target_set and len(current_symbols) == self.stockcount
     
     def _initial_allocation(self, symbols: List[str], amount: Optional[float] = None, dry_run: bool = False) -> TradeSummary:
         """
         Perform initial allocation when portfolio is empty.
-        
+
         Args:
             symbols: List of symbols to buy
             amount: Amount to allocate. If None, uses initial_capital.
             dry_run: If True, print actions but don't execute trades.
         """
+        # Use only top stockcount symbols
+        symbols = symbols[:self.stockcount]
+
         buys = []
         failed_trades = []  # Track failed trades
         allocation_amount = amount if amount is not None else self.initial_capital
@@ -310,39 +337,59 @@ class Rebalancer:
         current_allocations: List[Allocation],
         current_week_symbols: List[str],
         previous_week_symbols: List[str],
+        current_ranks: Dict[str, int],
         external_sale_proceeds: float = 0.0,
         external_sales_by_symbol: Optional[Dict[str, Any]] = None,
         dry_run: bool = False,
     ) -> TradeSummary:
         """
-        Execute rebalancing based on week-over-week leaderboard comparison.
-        
-        Sell stocks that were in last week's top 5 but aren't in this week's top 5.
-        Buy stocks that entered this week's top 5.
-        
+        Execute rebalancing based on week-over-week leaderboard comparison with slack.
+
+        Buy stocks ranked 1 to stockcount that we don't hold.
+        Sell stocks that dropped below stockcount + slack threshold.
+
         Args:
             current_allocations: Current portfolio positions
-            current_week_symbols: Top 5 symbols from current week's leaderboard
-            previous_week_symbols: Top 5 symbols from previous week's leaderboard
+            current_week_symbols: Top stockcount symbols from current week's leaderboard
+            previous_week_symbols: Top stockcount symbols from previous week's leaderboard
+            current_ranks: Dictionary mapping symbol to current rank
+            external_sale_proceeds: Proceeds from external sales available for reinvestment
+            external_sales_by_symbol: Dict of external sales by symbol
             dry_run: If True, print actions but don't execute trades.
         """
         current_symbols = {alloc.symbol.upper() for alloc in current_allocations}
-        current_week_set = {s.upper() for s in current_week_symbols}
-        previous_week_set = {s.upper() for s in previous_week_symbols}
-        
-        # Find symbols to sell: were in previous week's top 5 but not in current week's top 5
-        # Only sell if we actually hold them
-        # If persistence is enabled, only sell stocks we own according to persistence
-        symbols_to_sell = (previous_week_set - current_week_set) & current_symbols
-        
+        current_week_set = {s.upper() for s in current_week_symbols}  # Top stockcount symbols
+
+        # Sell threshold: stockcount + slack
+        sell_threshold = self.stockcount + self.slack
+
+        # Find symbols to sell: current holdings that dropped below threshold
+        symbols_to_sell = set()
+        for symbol in current_symbols:
+            rank = current_ranks.get(symbol)
+            if rank is None:
+                # Symbol not in leaderboard anymore - sell it
+                logger.info(f"[{self.portfolio_name}] {symbol} no longer in leaderboard. Will sell.")
+                symbols_to_sell.add(symbol)
+            elif rank > sell_threshold:
+                # Rank dropped below threshold - sell it
+                logger.info(f"[{self.portfolio_name}] {symbol} rank={rank} > threshold={sell_threshold}. Will sell.")
+                symbols_to_sell.add(symbol)
+            else:
+                logger.info(f"[{self.portfolio_name}] {symbol} rank={rank} <= threshold={sell_threshold}. Holding.")
+
         # Filter by persistence ownership if enabled
         if self.persistence_manager:
             owned_symbols = self.persistence_manager.get_owned_symbols(self.portfolio_name)
             symbols_to_sell = symbols_to_sell & owned_symbols
             logger.info(f"[{self.portfolio_name}] Persistence enabled: Only selling from owned symbols: {owned_symbols}")
-        
-        # Find symbols to buy: in current week's top 5 but not currently held
+
+        # Find symbols to buy: in top stockcount but not currently held
         symbols_to_buy = current_week_set - current_symbols
+
+        for symbol in symbols_to_buy:
+            rank = current_ranks.get(symbol, 999)
+            logger.info(f"[{self.portfolio_name}] {symbol} rank={rank} in top {self.stockcount}. Will buy.")
         
         # If persistence is enabled, also buy:
         # 1. Symbols that are held but NOT purchased by bot (manually purchased stocks that enter top 5)
@@ -561,6 +608,43 @@ class Rebalancer:
         
         # Buy new positions that entered top 5 (equal weight) using proceeds from sales + external sales
         total_available = total_proceeds + external_sale_proceeds
+
+        # If no sale proceeds but missing stocks exist, use initial capital from portfolio cash
+        if symbols_to_buy and total_available == 0 and self.persistence_manager:
+            # Find stocks not held at all (truly missing from portfolio)
+            owned_symbols = self.persistence_manager.get_owned_symbols(self.portfolio_name)
+            missing_stocks = symbols_to_buy - current_symbols  # Not held by broker at all
+
+            if missing_stocks:
+                # Get available cash balance from portfolio cash tracking
+                available_cash = self.persistence_manager.get_portfolio_cash(self.portfolio_name)
+
+                if available_cash > 0:
+                    # Calculate allocation per missing stock
+                    target_allocation = self.initial_capital / self.stockcount
+                    max_per_stock = available_cash / len(missing_stocks)
+                    allocation_per_stock = min(target_allocation, max_per_stock)
+
+                    if allocation_per_stock >= 1.0:  # Minimum viable trade ($1)
+                        total_available = allocation_per_stock * len(missing_stocks)
+                        symbols_to_buy = missing_stocks  # Only buy truly missing stocks
+                        logger.info(
+                            f"[{self.portfolio_name}] Using initial capital for missing stocks: "
+                            f"${allocation_per_stock:.2f}/stock for {missing_stocks} "
+                            f"(available cash: ${available_cash:.2f})"
+                        )
+                    else:
+                        logger.warning(
+                            f"[{self.portfolio_name}] Insufficient cash (${available_cash:.2f}) "
+                            f"for missing stocks: {missing_stocks} (need at least $1/stock)"
+                        )
+                        symbols_to_buy = set()
+                else:
+                    logger.warning(
+                        f"[{self.portfolio_name}] No cash available for missing stocks: {missing_stocks}"
+                    )
+                    symbols_to_buy = set()
+
         if symbols_to_buy:
             if total_available == 0:
                 # Check if any are manually held stocks that need bot purchase
