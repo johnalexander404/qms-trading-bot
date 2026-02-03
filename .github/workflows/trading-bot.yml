@@ -1,6 +1,10 @@
 name: Trading Bot Rebalancing
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     # Run every 5 minutes from 9:30-10:00 AM Eastern Time on Monday
     # This enables cron resilience - if a run fails, the next one will retry
@@ -37,6 +41,8 @@ on:
 
 jobs:
   test:
+    # Only run tests on push/PR, not on scheduled runs or manual triggers
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +70,7 @@ jobs:
           fail_ci_if_error: false
 
   rebalance:
-    needs: test
+    # Only run on schedule or manual trigger (not on push/PR)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10  # Adjust based on your needs
