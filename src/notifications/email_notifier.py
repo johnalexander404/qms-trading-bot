@@ -540,15 +540,8 @@ class EmailNotifier(ABC):
                     """
                 html += "</table>"
             
-            # Add current holdings - only for stocks traded by the algo in this run
-            traded_symbols = set()
-            for buy in summary.buys:
-                traded_symbols.add(buy['symbol'].upper())
-            for sell in summary.sells:
-                traded_symbols.add(sell['symbol'].upper())
-
-            traded_allocations = [a for a in summary.final_allocations if a.symbol.upper() in traded_symbols]
-            if traded_allocations:
+            # Add current holdings for all stocks owned by this portfolio
+            if summary.final_allocations:
                 ownership_data = (portfolio_ownership or {}).get(portfolio_name, {})
                 html += """
                 <h4>Current Holdings</h4>
@@ -564,7 +557,7 @@ class EmailNotifier(ABC):
                         <th>Gain %</th>
                     </tr>
                 """
-                for allocation in traded_allocations:
+                for allocation in summary.final_allocations:
                     symbol = allocation.symbol.upper()
                     ownership = ownership_data.get(symbol, {})
                     avg_price = ownership.get('avg_price', 0.0)
@@ -831,18 +824,11 @@ Performance: ${performance.total_return:,.2f} ({performance.total_return_pct:.2f
                     text += f"  - {buy['symbol']}: {buy['quantity']:.2f} shares, ${buy['cost']:.2f}\n"
                 text += "\n"
             
-            # Add current holdings - only for stocks traded by the algo in this run
-            traded_symbols_text = set()
-            for buy in summary.buys:
-                traded_symbols_text.add(buy['symbol'].upper())
-            for sell in summary.sells:
-                traded_symbols_text.add(sell['symbol'].upper())
-
-            traded_allocs_text = [a for a in summary.final_allocations if a.symbol.upper() in traded_symbols_text]
-            if traded_allocs_text:
+            # Add current holdings for all stocks owned by this portfolio
+            if summary.final_allocations:
                 ownership_data = (portfolio_ownership or {}).get(portfolio_name, {})
                 text += "Current Holdings:\n"
-                for allocation in traded_allocs_text:
+                for allocation in summary.final_allocations:
                     symbol = allocation.symbol.upper()
                     ownership = ownership_data.get(symbol, {})
                     avg_price = ownership.get('avg_price', 0.0)
