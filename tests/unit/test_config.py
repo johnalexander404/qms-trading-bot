@@ -29,6 +29,19 @@ def test_broker_config_validation():
     )
     config.validate_broker_credentials()  # Should not raise
     
+    # Valid Tradier config
+    config = BrokerConfig(
+        broker_type="tradier",
+        tradier_access_token="token",
+        tradier_account_id="account123",
+    )
+    config.validate_broker_credentials()  # Should not raise
+    
+    # Invalid Tradier config
+    config = BrokerConfig(broker_type="tradier")
+    with pytest.raises(ValueError, match="Tradier access token"):
+        config.validate_broker_credentials()
+    
     # Invalid broker type
     with pytest.raises(ValueError, match="Invalid broker type"):
         BrokerConfig(broker_type="invalid")

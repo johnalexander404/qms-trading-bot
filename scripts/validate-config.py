@@ -35,6 +35,11 @@ def validate_config():
                 print("  ✓ Robinhood credentials configured")
             else:
                 errors.append("Robinhood username and password are required")
+        elif config.broker.broker_type == "tradier":
+            if config.broker.tradier_access_token and config.broker.tradier_account_id:
+                print("  ✓ Tradier credentials configured")
+            else:
+                errors.append("Tradier access token and account ID are required")
         
         # Validate leaderboard
         print(f"\nLeaderboard API: {config.leaderboard_api_url}")

@@ -10,6 +10,16 @@ Complete guide for setting up and running the QMS Trading Bot locally or with Do
 
 ## Quick Start
 
+### Setup Wizard (Fastest)
+
+The interactive setup wizard generates your `.env` file automatically, with guided prompts and browser links for API key generation:
+
+```bash
+python scripts/setup.py
+```
+
+The wizard only asks about the broker and services you actually use. It can also auto-create Firebase resources via `gcloud` CLI. Run it and skip to Step 4 below.
+
 ### Option 1: Docker (Recommended)
 
 1. **Clone the repository**

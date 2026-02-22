@@ -91,10 +91,19 @@ def verify_firebase():
         })
         print("   ✓ Firebase initialized successfully")
         
-        # Get Firestore client
+        # Get Firestore client (optionally a named database and collection prefix)
+        database_id = os.getenv("FIRESTORE_DATABASE_ID") or None
+        collection_prefix = (os.getenv("PERSISTENCE_COLLECTION_PREFIX") or "").strip()
+        if database_id and database_id != "(default)":
+            print(f"   Database ID: {database_id}")
+        if collection_prefix:
+            print(f"   Collection prefix: {collection_prefix}")
         print("\n2. Connecting to Firestore...")
         try:
-            db = firestore.client()
+            if database_id and database_id != "(default)":
+                db = firestore.client(database_id=database_id)
+            else:
+                db = firestore.client()
             print("   ✓ Connected to Firestore")
         except Exception as e:
             error_msg = str(e)
@@ -123,7 +132,8 @@ def verify_firebase():
         for collection_name in collections:
             try:
                 # Try to read from collection (will create it if it doesn't exist)
-                collection_ref = db.collection(collection_name)
+                full_name = f"{collection_prefix}{collection_name}"
+                collection_ref = db.collection(full_name)
                 # Create a test document to ensure collection exists
                 test_doc_ref = collection_ref.document('_setup_test')
                 test_doc_ref.set({
@@ -132,10 +142,18 @@ def verify_firebase():
                 })
                 # Delete test document
                 test_doc_ref.delete()
-                print(f"   ✓ Collection '{collection_name}' verified")
+                print(f"   ✓ Collection '{full_name}' verified")
             except Exception as e:
                 error_msg = str(e)
-                print(f"   ✗ Error verifying '{collection_name}': {e}")
+                print(f"   ✗ Error verifying '{full_name}': {e}")
+                
+                # Check if it's a permissions (403) error
+                if "403" in error_msg or "Missing or insufficient permissions" in error_msg or "Permission denied" in error_msg:
+                    print("\n   Permission denied (403). Common causes:")
+                    print("   - IAM can take 1–2 minutes to propagate after setup. Wait and run this script again.")
+                    print("   - Service account needs 'Cloud Datastore Owner' or 'Cloud Datastore User' in IAM.")
+                    print(f"   - Check: https://console.cloud.google.com/iam-admin/iam?project={project_id}")
+                    return 1
                 
                 # Check if database doesn't exist
                 if "does not exist" in error_msg or "404" in error_msg:
@@ -172,7 +190,7 @@ def verify_firebase():
         
         # Test read/write operations
         print("\n4. Testing read/write operations...")
-        test_collection = db.collection('_setup_test')
+        test_collection = db.collection(f"{collection_prefix}_setup_test")
         test_doc = test_collection.document('test')
         test_doc.set({
             'message': 'Firebase setup test',

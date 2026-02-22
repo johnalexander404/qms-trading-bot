@@ -133,7 +133,7 @@ class WebullBroker(Broker):
             logger.error(f"Error getting positions from Webull: {e}")
             raise
     
-    def sell(self, symbol: str, quantity: float) -> bool:
+    def sell(self, symbol: str, quantity: float, tag: Optional[str] = None) -> bool:
         """Sell a stock."""
         try:
             # Get instrument_id
@@ -172,7 +172,7 @@ class WebullBroker(Broker):
             logger.error(f"Error selling {symbol}: {e}")
             return False
     
-    def buy(self, symbol: str, amount: float) -> bool:
+    def buy(self, symbol: str, amount: float, tag: Optional[str] = None) -> bool:
         """Buy a stock with a specific dollar amount."""
         try:
             # Get instrument_id

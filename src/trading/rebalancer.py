@@ -173,7 +173,6 @@ class Rebalancer:
         buys = []
         failed_trades = []  # Track failed trades
         allocation_amount = amount if amount is not None else self.initial_capital
-        # Round to 2 decimal places (Alpaca requires notional values to be limited to 2 decimal places)
         allocation_per_stock = round(allocation_amount / len(symbols), 2)
         
         if dry_run:
@@ -194,7 +193,7 @@ class Rebalancer:
                 logger.info(f"[{self.portfolio_name}] [DRY-RUN] Would buy ${allocation_per_stock} of {symbol}")
             else:
                 try:
-                    success = self.broker.buy(symbol, allocation_per_stock)
+                    success = self.broker.buy(symbol, allocation_per_stock, tag=self.portfolio_name)
                     # Try to get order ID if broker supports it
                     order_id = None
                     try:
@@ -366,6 +365,7 @@ class Rebalancer:
         sells = []
         buys = []
         failed_trades = []  # Track failed trades
+        final_allocations = []  # Initialize early to avoid scoping issues
         
         # Sell positions that dropped out of top 5
         total_proceeds = 0.0
@@ -451,7 +451,7 @@ class Rebalancer:
                                 logger.warning(f"[{self.portfolio_name}] Cannot sell {symbol}: Portfolio has no tracked ownership")
                                 continue
                         
-                        success = self.broker.sell(symbol, allocation.quantity)
+                        success = self.broker.sell(symbol, allocation.quantity, tag=self.portfolio_name)
                         if success:
                             # Try to get order ID if broker supports it
                             order_id = None
@@ -573,8 +573,6 @@ class Rebalancer:
                 else:
                     logger.warning(f"[{self.portfolio_name}] Symbols to buy: {symbols_to_buy}, but no proceeds available. Skipping purchases.")
             else:
-                # Use proceeds from sales + external sale proceeds
-                # Round to 2 decimal places (Alpaca requires notional values to be limited to 2 decimal places)
                 allocation_per_stock = round(total_available / len(symbols_to_buy), 2)
                 if dry_run:
                     logger.info(f"[{self.portfolio_name}] [DRY-RUN] Would buy {len(symbols_to_buy)} new stocks with ${allocation_per_stock} each (using proceeds: ${total_available:.2f})")
@@ -609,7 +607,7 @@ class Rebalancer:
                             logger.info(f"[{self.portfolio_name}] [DRY-RUN] Would buy ${allocation_per_stock} of {symbol} (entered top 5)")
                     else:
                         try:
-                            success = self.broker.buy(symbol, allocation_per_stock)
+                            success = self.broker.buy(symbol, allocation_per_stock, tag=self.portfolio_name)
                             # Try to get order ID if broker supports it
                             order_id = None
                             try:
@@ -640,20 +638,16 @@ class Rebalancer:
                                 if self.persistence_manager:
                                     from ..persistence.models import TradeRecord
                                     # Get current price for the trade record
-                                    current_price = next(
-                                        (alloc.current_price for alloc in final_allocations if alloc.symbol.upper() == symbol.upper()),
-                                        0.0
-                                    )
-                                    if current_price == 0.0:
-                                        # Try to get from current allocations if final_allocations not updated yet
-                                        try:
-                                            updated_allocations = self.broker.get_current_allocation()
-                                            current_price = next(
-                                                (alloc.current_price for alloc in updated_allocations if alloc.symbol.upper() == symbol.upper()),
-                                                allocation_per_stock  # Fallback to notional
-                                            )
-                                        except:
-                                            current_price = allocation_per_stock
+                                    # Note: final_allocations isn't available yet, so get from broker directly
+                                    current_price = 0.0
+                                    try:
+                                        updated_allocations = self.broker.get_current_allocation()
+                                        current_price = next(
+                                            (alloc.current_price for alloc in updated_allocations if alloc.symbol.upper() == symbol.upper()),
+                                            allocation_per_stock  # Fallback to notional
+                                        )
+                                    except:
+                                        current_price = allocation_per_stock
                                     
                                     trade = TradeRecord(
                                         symbol=symbol,

@@ -8,16 +8,22 @@ from .broker import Broker
 from .alpaca import AlpacaBroker
 from .robinhood import RobinhoodBroker
 from .webull import WebullBroker
+from .tradier import TradierBroker
 
 logger = logging.getLogger(__name__)
 
 
-def create_broker() -> Broker:
+def create_broker(account_id_override: Optional[str] = None) -> Broker:
     """
     Create a broker instance based on configuration.
     
+    Args:
+        account_id_override: Optional account ID to use instead of the default.
+            When provided, overrides the broker-specific account ID from config
+            (e.g. for per-portfolio Tradier sub-accounts).
+    
     Returns:
-        Broker instance (AlpacaBroker, RobinhoodBroker, or WebullBroker)
+        Broker instance (AlpacaBroker, RobinhoodBroker, WebullBroker, or TradierBroker)
         
     Raises:
         ValueError: If broker type is unsupported or credentials are missing
@@ -52,8 +58,19 @@ def create_broker() -> Broker:
         return WebullBroker(
             app_key=config.broker.webull_app_key,
             app_secret=config.broker.webull_app_secret,
-            account_id=config.broker.webull_account_id,
+            account_id=account_id_override or config.broker.webull_account_id,
             region=config.broker.webull_region,
+        )
+    
+    elif broker_type == "tradier":
+        effective_account_id = account_id_override or config.broker.tradier_account_id
+        if not config.broker.tradier_access_token or not effective_account_id:
+            raise ValueError("Tradier access token and account ID are required")
+        
+        return TradierBroker(
+            access_token=config.broker.tradier_access_token,
+            account_id=effective_account_id,
+            base_url=config.broker.tradier_base_url,
         )
     
     else:

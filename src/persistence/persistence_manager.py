@@ -26,7 +26,14 @@ from typing import List as TypingList
 class PersistenceManager:
     """Manages trade and ownership persistence in Firebase Firestore."""
     
-    def __init__(self, project_id: str, credentials_path: Optional[str] = None, credentials_json: Optional[str] = None):
+    def __init__(
+        self,
+        project_id: str,
+        credentials_path: Optional[str] = None,
+        credentials_json: Optional[str] = None,
+        database_id: Optional[str] = None,
+        collection_prefix: Optional[str] = None,
+    ):
         """
         Initialize Firebase connection.
         
@@ -34,6 +41,8 @@ class PersistenceManager:
             project_id: Firebase project ID
             credentials_path: Path to Firebase service account JSON file (optional if credentials_json is provided)
             credentials_json: Firebase service account JSON as string (optional if credentials_path is provided)
+            database_id: Firestore database ID, e.g. '(default)' or 'live'. Omit/None to use default database.
+            collection_prefix: Prefix for collection names, e.g. 'paper_' or 'live_' to isolate environments in same DB.
         """
         if not FIREBASE_AVAILABLE:
             raise ImportError("firebase-admin is not installed. Install it with: pip install firebase-admin")
@@ -62,12 +71,21 @@ class PersistenceManager:
             # App already initialized (e.g., in tests)
             pass
         
-        self.db = firestore.client()
+        # Use named database if specified (same project, different DB for e.g. paper vs live)
+        if database_id and database_id != "(default)":
+            self.db = firestore.client(database_id=database_id)
+        else:
+            self.db = firestore.client()
         self.project_id = project_id
+        self._collection_prefix = (collection_prefix or "").strip()
+    
+    def _coll(self, name: str):
+        """Return collection reference with optional prefix for environment isolation."""
+        return self.db.collection(f"{self._collection_prefix}{name}")
     
     def record_trade(self, trade: TradeRecord) -> None:
         """Record a trade in Firestore."""
-        collection = self.db.collection('trades')
+        collection = self._coll('trades')
         doc_ref = collection.document()
         doc_ref.set(trade.to_dict())
         
@@ -80,7 +98,7 @@ class PersistenceManager:
         portfolio_name = trade.portfolio_name
         # Use composite key: {portfolio_name}_{symbol}
         doc_id = f"{portfolio_name}_{symbol}"
-        ownership_ref = self.db.collection('ownership').document(doc_id)
+        ownership_ref = self._coll('ownership').document(doc_id)
         ownership_doc = ownership_ref.get()
         
         if trade.action == "BUY":
@@ -172,7 +190,7 @@ class PersistenceManager:
     
     def get_owned_symbols(self, portfolio_name: str = "SP400") -> Set[str]:
         """Get set of symbols we own according to persistence for a specific portfolio."""
-        ownership_ref = self.db.collection('ownership')
+        ownership_ref = self._coll('ownership')
         # Use FieldFilter to avoid positional argument warning
         if FieldFilter:
             docs = ownership_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name)).stream()
@@ -193,7 +211,7 @@ class PersistenceManager:
         """Get owned quantity for a symbol in a specific portfolio."""
         symbol = symbol.upper()
         doc_id = f"{portfolio_name}_{symbol}"
-        ownership_ref = self.db.collection('ownership').document(doc_id)
+        ownership_ref = self._coll('ownership').document(doc_id)
         ownership_doc = ownership_ref.get()
         
         if ownership_doc.exists:
@@ -249,7 +267,7 @@ class PersistenceManager:
     def get_total_tracked_ownership(self, symbol: str) -> float:
         """Get total tracked ownership across all portfolios for a symbol."""
         symbol = symbol.upper()
-        ownership_ref = self.db.collection('ownership')
+        ownership_ref = self._coll('ownership')
         if FieldFilter:
             docs = ownership_ref.where(filter=FieldFilter('symbol', '==', symbol)).stream()
         else:
@@ -282,7 +300,7 @@ class PersistenceManager:
         Returns:
             Dict mapping symbol to dict with 'quantity', 'total_cost', and 'avg_price'
         """
-        ownership_ref = self.db.collection('ownership')
+        ownership_ref = self._coll('ownership')
         if FieldFilter:
             docs = ownership_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name)).stream()
         else:
@@ -308,7 +326,7 @@ class PersistenceManager:
     def get_all_portfolios_owning_symbol(self, symbol: str) -> TypingList[str]:
         """Get list of portfolio names that own a symbol."""
         symbol = symbol.upper()
-        ownership_ref = self.db.collection('ownership')
+        ownership_ref = self._coll('ownership')
         if FieldFilter:
             docs = ownership_ref.where(filter=FieldFilter('symbol', '==', symbol)).stream()
         else:
@@ -335,7 +353,7 @@ class PersistenceManager:
         
         # Get DB ownership for this portfolio
         db_ownership: Dict[str, float] = {}
-        ownership_ref = self.db.collection('ownership')
+        ownership_ref = self._coll('ownership')
         if FieldFilter:
             docs = ownership_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name)).stream()
         else:
@@ -362,7 +380,7 @@ class PersistenceManager:
                 # This allows bot to continue managing remaining shares
                 
                 doc_id = f"{portfolio_name}_{symbol}"
-                ownership_ref = self.db.collection('ownership').document(doc_id)
+                ownership_ref = self._coll('ownership').document(doc_id)
                 ownership_doc = ownership_ref.get()
                 if not ownership_doc.exists:
                     continue
@@ -419,7 +437,7 @@ class PersistenceManager:
         
         # Get all DB trades
         db_trades: Set[str] = set()
-        trades_ref = self.db.collection('trades')
+        trades_ref = self._coll('trades')
         docs = trades_ref.stream()
         for doc in docs:
             data = doc.to_dict()
@@ -452,13 +470,13 @@ class PersistenceManager:
     
     def _record_external_sale(self, sale: ExternalSaleRecord) -> None:
         """Record an external sale detection."""
-        collection = self.db.collection('external_sales')
+        collection = self._coll('external_sales')
         doc_ref = collection.document()
         doc_ref.set(sale.to_dict())
     
     def get_unused_external_sale_proceeds(self, portfolio_name: str = "SP400") -> float:
         """Get total proceeds from external sales not yet used for reinvestment for a specific portfolio."""
-        external_sales_ref = self.db.collection('external_sales')
+        external_sales_ref = self._coll('external_sales')
         if FieldFilter:
             docs = external_sales_ref.where(filter=FieldFilter('used_for_reinvestment', '==', False)).where(filter=FieldFilter('portfolio_name', '==', portfolio_name)).stream()
         else:
@@ -473,7 +491,7 @@ class PersistenceManager:
     
     def mark_external_sales_used(self, amount: float, portfolio_name: str = "SP400") -> None:
         """Mark external sales as used for reinvestment for a specific portfolio."""
-        external_sales_ref = self.db.collection('external_sales')
+        external_sales_ref = self._coll('external_sales')
         if FieldFilter:
             docs = external_sales_ref.where(filter=FieldFilter('used_for_reinvestment', '==', False)).where(filter=FieldFilter('portfolio_name', '==', portfolio_name)).stream()
         else:
@@ -522,7 +540,7 @@ class PersistenceManager:
             return {'updated': 0, 'missing': 0, 'unfilled': 0}
         
         # Get all Firestore trades from recent period for this portfolio
-        trades_ref = self.db.collection('trades')
+        trades_ref = self._coll('trades')
         # Get trades from last 7 days (adjust as needed)
         cutoff_date = datetime.now() - timedelta(days=7)
         
@@ -780,7 +798,7 @@ class PersistenceManager:
                     }
         
         # Get DB ownership records
-        ownership_ref = self.db.collection('ownership')
+        ownership_ref = self._coll('ownership')
         if FieldFilter:
             docs = ownership_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name)).stream()
         else:
@@ -840,7 +858,7 @@ class PersistenceManager:
         Returns:
             True if there are unfilled trades, False otherwise
         """
-        trades_ref = self.db.collection('trades')
+        trades_ref = self._coll('trades')
         cutoff_time = datetime.now() - timedelta(hours=hours)
         
         if FieldFilter:
@@ -892,7 +910,7 @@ class PersistenceManager:
             }
         """
         # Get all trade records for this portfolio
-        trades_ref = self.db.collection('trades')
+        trades_ref = self._coll('trades')
         if FieldFilter:
             trades_query = trades_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name))
         else:
@@ -956,7 +974,7 @@ class PersistenceManager:
             
             # Update or create ownership record
             doc_id = f"{portfolio_name}_{symbol}"
-            ownership_ref = self.db.collection('ownership').document(doc_id)
+            ownership_ref = self._coll('ownership').document(doc_id)
             ownership_doc = ownership_ref.get()
             
             if net_quantity > 0:
@@ -1027,7 +1045,7 @@ class PersistenceManager:
         Returns:
             List of trade dictionaries with keys: action, total, quantity, price, timestamp
         """
-        trades_ref = self.db.collection('trades')
+        trades_ref = self._coll('trades')
         
         if FieldFilter:
             query = trades_ref.where(filter=FieldFilter('portfolio_name', '==', portfolio_name))

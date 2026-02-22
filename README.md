@@ -27,7 +27,25 @@ Choose your deployment method:
 - Broker account (Alpaca, Robinhood, or Webull)
 - Leaderboard API access
 
-### Quick Local Test
+### Automated Setup (Recommended)
+
+The interactive setup wizard walks you through configuration step-by-step, opens the right URLs for API key generation, and can auto-create Firebase resources:
+
+```bash
+python scripts/setup.py
+```
+
+It generates your `.env` file with only the settings you need, and can push secrets/variables directly to GitHub Actions (including multi-environment support for paper/live trading):
+
+```bash
+python scripts/setup.py --github          # push to GitHub Actions
+python scripts/setup.py --github --env    # both .env and GitHub
+python scripts/setup.py --github --list   # manage environments
+```
+
+📖 See [GitHub Actions Setup](docs/GITHUB_ACTIONS_DEPLOYMENT.md) for environment details.
+
+### Manual Setup
 
 1. **Clone and setup:**
    ```bash

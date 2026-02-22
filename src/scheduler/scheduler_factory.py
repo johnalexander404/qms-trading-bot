@@ -25,6 +25,7 @@ def create_scheduler(job_function: Callable) -> Optional[CronScheduler]:
         return CronScheduler(
             cron_expression=config.scheduler.cron_schedule,
             job_function=job_function,
+            timezone=config.scheduler.cron_timezone,
         )
     else:
         logger.info("External scheduler mode - no internal scheduler created")

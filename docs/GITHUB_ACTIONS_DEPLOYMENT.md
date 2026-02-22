@@ -14,6 +14,29 @@ GitHub Actions can trigger your bot on a schedule (e.g., weekly) using the **ext
 
 ## Setup Instructions
 
+### Automated Setup (Recommended)
+
+The setup wizard can push all secrets and variables to GitHub Actions automatically, including support for multiple environments (e.g., paper trading and live trading):
+
+```bash
+# Interactive setup → push to GitHub
+python scripts/setup.py --github
+
+# Set up a second environment (e.g., live)
+python scripts/setup.py --github
+
+# Manage environments
+python scripts/setup.py --github --list          # show all environments
+python scripts/setup.py --github --disable live  # pause scheduled runs
+python scripts/setup.py --github --enable live    # resume scheduled runs
+```
+
+When using environments, the wizard uses the `Trading Bot (Environments)` workflow (`.github/workflows/trading-bot-environments.yml`) which runs all active environments on schedule and lets you pick one for manual dispatch.
+
+**Requirements:** [GitHub CLI (`gh`)](https://cli.github.com/) installed and authenticated (`gh auth login`).
+
+### Manual Setup
+
 ### Step 1: Configure Secrets and Variables
 
 1. Fork the repo and go to your GitHub repository

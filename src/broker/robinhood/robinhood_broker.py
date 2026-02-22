@@ -63,7 +63,7 @@ class RobinhoodBroker(Broker):
             logger.error(f"Error getting positions from Robinhood: {e}")
             raise
     
-    def sell(self, symbol: str, quantity: float) -> bool:
+    def sell(self, symbol: str, quantity: float, tag: Optional[str] = None) -> bool:
         """Sell a stock."""
         try:
             order = rh.order_sell_market(symbol=symbol, quantity=quantity)
@@ -77,7 +77,7 @@ class RobinhoodBroker(Broker):
             logger.error(f"Error selling {symbol}: {e}")
             return False
     
-    def buy(self, symbol: str, amount: float) -> bool:
+    def buy(self, symbol: str, amount: float, tag: Optional[str] = None) -> bool:
         """Buy a stock with a specific dollar amount."""
         try:
             # Get current price to calculate quantity

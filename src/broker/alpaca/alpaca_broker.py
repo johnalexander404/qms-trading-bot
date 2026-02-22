@@ -2,7 +2,8 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
+from uuid import uuid4
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -48,15 +49,24 @@ class AlpacaBroker(Broker):
             logger.error(f"Error getting positions from Alpaca: {e}")
             raise
     
-    def sell(self, symbol: str, quantity: float) -> bool:
+    def _make_client_order_id(self, tag: Optional[str]) -> Optional[str]:
+        if tag:
+            return f"{tag}-{uuid4().hex[:8]}"
+        return None
+
+    def sell(self, symbol: str, quantity: float, tag: Optional[str] = None) -> bool:
         """Sell a stock."""
         try:
-            order_data = MarketOrderRequest(
+            kwargs = dict(
                 symbol=symbol,
                 qty=quantity,
                 side=OrderSide.SELL,
                 time_in_force=TimeInForce.DAY,
             )
+            client_order_id = self._make_client_order_id(tag)
+            if client_order_id:
+                kwargs["client_order_id"] = client_order_id
+            order_data = MarketOrderRequest(**kwargs)
             order = self.client.submit_order(order_data=order_data)
             logger.info(f"Sold {quantity} shares of {symbol}. Order ID: {order.id}")
             return True
@@ -64,27 +74,24 @@ class AlpacaBroker(Broker):
             logger.error(f"Error selling {symbol}: {e}")
             return False
     
-    def buy(self, symbol: str, amount: float) -> bool:
+    def buy(self, symbol: str, amount: float, tag: Optional[str] = None) -> bool:
         """Buy a stock with a specific dollar amount."""
         try:
-            # Get current price to calculate quantity
             asset = self.client.get_asset(symbol)
             if not asset.tradable:
                 logger.error(f"Asset {symbol} is not tradable")
                 return False
             
-            # Get latest quote to determine price
-            from alpaca.data.historical import StockHistoricalDataClient
-            from alpaca.data.requests import StockLatestQuoteRequest
-            
-            # For simplicity, we'll use notional order (dollar amount)
-            # Alpaca supports notional orders
-            order_data = MarketOrderRequest(
+            kwargs = dict(
                 symbol=symbol,
                 notional=amount,
                 side=OrderSide.BUY,
                 time_in_force=TimeInForce.DAY,
             )
+            client_order_id = self._make_client_order_id(tag)
+            if client_order_id:
+                kwargs["client_order_id"] = client_order_id
+            order_data = MarketOrderRequest(**kwargs)
             order = self.client.submit_order(order_data=order_data)
             logger.info(f"Bought ${amount} worth of {symbol}. Order ID: {order.id}")
             return True
@@ -177,7 +184,7 @@ class AlpacaBroker(Broker):
                 else:
                     timestamp = datetime.now()
                 
-                trades.append({
+                trade_entry = {
                     'symbol': order.symbol,
                     'action': action,
                     'quantity': quantity,
@@ -185,7 +192,13 @@ class AlpacaBroker(Broker):
                     'total': total,
                     'timestamp': timestamp,
                     'trade_id': str(order.id),
-                })
+                }
+                if order.client_order_id:
+                    trade_entry['client_order_id'] = order.client_order_id
+                    parts = order.client_order_id.rsplit("-", 1)
+                    if len(parts) == 2:
+                        trade_entry['tag'] = parts[0]
+                trades.append(trade_entry)
             
             logger.info(f"Retrieved {len(trades)} filled orders from Alpaca")
             return trades

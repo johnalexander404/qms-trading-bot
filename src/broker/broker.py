@@ -1,7 +1,7 @@
 """Abstract base class for broker implementations."""
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 from .models import Allocation
 
 
@@ -19,13 +19,14 @@ class Broker(ABC):
         pass
     
     @abstractmethod
-    def sell(self, symbol: str, quantity: float) -> bool:
+    def sell(self, symbol: str, quantity: float, tag: Optional[str] = None) -> bool:
         """
         Sell a stock.
         
         Args:
             symbol: Stock symbol to sell
             quantity: Number of shares to sell
+            tag: Optional portfolio tag to attach to the order
             
         Returns:
             True if order was placed successfully, False otherwise
@@ -33,13 +34,14 @@ class Broker(ABC):
         pass
     
     @abstractmethod
-    def buy(self, symbol: str, amount: float) -> bool:
+    def buy(self, symbol: str, amount: float, tag: Optional[str] = None) -> bool:
         """
         Buy a stock with a specific dollar amount.
         
         Args:
             symbol: Stock symbol to buy
             amount: Dollar amount to spend
+            tag: Optional portfolio tag to attach to the order
             
         Returns:
             True if order was placed successfully, False otherwise

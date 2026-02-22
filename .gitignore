@@ -30,6 +30,8 @@ env/
 .env
 .env.local
 .env.*.local
+.env.generated
+.setup-progress.json
 
 # Firebase credentials (never commit!)
 firebase-service-account.json
